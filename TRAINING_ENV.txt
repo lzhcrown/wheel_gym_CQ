@@ -1,0 +1,70 @@
+Python 3.8 训练环境（uv venv）
+
+项目目录：/home/crown/wheel_gym_CQ
+虚拟环境：/home/crown/wheel_gym_CQ/.venv
+Python：3.8.20
+PyTorch：2.0.1+cu118
+TorchVision：0.15.2+cu118
+NumPy：1.23.5
+Isaac Gym：本机 /home/crown/isaacgym/python，Preview 4
+全部依赖的实际版本记录在 requirements-train-py38.lock。
+
+一、日常使用（环境已经创建，无需重复安装）
+cd /home/crown/wheel_gym_CQ
+source scripts/activate_train.sh
+python wheel_legged_gym/scripts/train.py --task exp451_est_64_64 --headless --seed 10 --num_envs 4096 --max_iterations 10000 --save_interval 100
+
+activate_train.sh 会执行 source .venv/bin/activate，并清除系统 ROS 的
+PYTHONPATH，设置 Python 3.8 动态库目录，以及当前环境独立的 gymtorch 编译缓存。
+退出环境用 deactivate；新的终端中重新 source scripts/activate_train.sh。
+10000 是上述命令指定的迭代数；六组对照应使用相同种子和相同训练预算。
+运行时按 Ctrl+C 停止，已经写入的 CSV 保留。训练不会自动生成图片。
+
+二、依次运行六组
+cd /home/crown/wheel_gym_CQ
+bash scripts/train_chapter451.sh --headless
+
+六组均默认启用 headless，无仿真窗口；可像上面这样显式传入 --headless。
+
+脚本会自动激活项目 .venv。默认每组 10000 次迭代、4096 个并行仿真环境、
+seed=10、每 100 次迭代保存一次模型。num_envs 指单组内的仿真环境数，
+六组实验本身依次执行，同一时刻只运行一组。
+顺序：baseline → critic_truth → actor_critic_truth → est_128_64 → est_64_64 → est_64_32。
+一组正常退出后才启动下一组；任意一组报错或按 Ctrl+C，整个批次停止，
+已生成的 CSV 和检查点保留。每次重新运行脚本会从第一组开始新训练。
+每组继续使用独立的 logs/chapter4_5_1/时间戳_组名/ 输出目录。
+
+统一调整六组的训练参数，例如每组训练 20000 次迭代：
+bash scripts/train_chapter451.sh --max_iterations 20000 --num_envs 4096 --seed 10 --save_interval 100
+
+仅预览命令，不激活环境、不训练：
+bash scripts/train_chapter451.sh --dry-run
+
+查看全部参数：
+bash scripts/train_chapter451.sh --help
+
+三、需要重新创建环境时
+uv venv --python 3.8.20 .venv
+uv pip install --python .venv/bin/python --index https://download.pytorch.org/whl/cu118 --index-strategy unsafe-best-match -r requirements-train-py38.lock
+uv pip install --python .venv/bin/python --no-build-isolation --no-deps -e /home/crown/isaacgym/python -e .
+uv pip check --python .venv/bin/python
+
+这些命令只操作本项目的 .venv。requirements 文件不包含机器相关的 editable
+路径，故本地 Isaac Gym 和本项目单独安装；在其他机器上需修改 Isaac Gym 路径。
+首次导入 gymtorch 会编译本机扩展，需要系统已有 C++ 编译器以及环境内的 ninja。
+
+四、CSV 数据
+自动输出目录：logs/chapter4_5_1/时间戳_组名/csv/
+平均奖励文件：Train_mean_reward.csv
+CSV 三列：wall_time,step,value；保留未平滑的原始记录。
+其他奖励、损失、估计误差的文件名映射见同目录 tags.json。
+训练仍保存模型检查点、配置快照和 TensorBoard 事件，以支持恢复与核对。
+可按需要从事件文件补导出 CSV：
+python wheel_legged_gym/scripts/tensorboard_data_ex.py logs/chapter4_5_1/RUN_NAME
+该命令也支持一次传入多个运行目录。
+
+MATLAB 读取示例：
+T = readtable('logs/chapter4_5_1/RUN_NAME/csv/Train_mean_reward.csv');
+% T.step 是训练迭代号，T.value 是该次记录的平均奖励。
+
+六组配置详细说明见 wheel_legged_gym/experiments/chapter4_5_1/README.txt。

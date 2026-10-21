@@ -1,0 +1,49 @@
+# Local Python environments and package caches
+/.venv*/
+/venv/
+/env/
+/.uv-cache/
+/.cache/
+
+# Training logs, generated data, videos and exported policies
+/logs/
+/videos/
+/runs/
+/wandb/
+/exports/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# Python bytecode, build products and test/tool caches
+__pycache__/
+*.py[cod]
+*.egg-info/
+/build/
+/dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.coverage
+.coverage.*
+/htmlcov/
+
+# Machine-specific editor settings and temporary files
+/.vscode/
+/.idea/
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# Local environment variables; keep shareable examples
+.env
+.env.*
+!.env.example
+
+# Keep source/configuration files, scripts, tests, dependency locks and docs.
+# Keep resources/, including URDF, meshes (STL/OBJ/etc.), textures and JSON/YAML.
+# Do not add blanket exclusions for *.json, *.csv or robot asset formats.

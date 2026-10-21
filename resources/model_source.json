@@ -1,0 +1,79 @@
+{
+  "source_directory": "/home/crown/LZHMine/resources/robots",
+  "target_directory": "/home/crown/wheel_gym_CQ/resources/robots",
+  "retained_robot": "urdf2.1",
+  "source_sha256": {
+    "urdf2.1/CMakeLists.txt": "f16d82d6ed01a1f0a41aab95b16f85021bf403318fea516577216b549bb4a4b0",
+    "urdf2.1/config/joint_names_nezha3_description.yaml": "4d2284322b99984c9009b14403a4006dcf07b193b4b6b51501a04ce47561d213",
+    "urdf2.1/launch/display.launch": "75565b594209d4ed70159ae348b1c341e34c1b5770db65c5dde6392b04f466c3",
+    "urdf2.1/launch/gazebo.launch": "a97cd184a106428bcffe313bd8216378aeeb844c6780b251d9b38825c7e4154e",
+    "urdf2.1/meshes/FL_calf.STL": "b5a93ca17c6ac6c9e7741b510cb277cb4b18a01f25fad9080266a07d29510e99",
+    "urdf2.1/meshes/FL_foot.STL": "cc968eed0258e8429a17a40686286e8bc0ba51cfe2922f81527c19f8fff671ec",
+    "urdf2.1/meshes/FL_footmotor.STL": "519df8af9bea5bbb0f98ff6017907a9236ff894e4ee19338ca828fb07af31b98",
+    "urdf2.1/meshes/FL_hip.STL": "cfd1b97d7ea43250379d07d418a2e475f67fecea54249a3857496dff6a386746",
+    "urdf2.1/meshes/FL_thigh.STL": "ec3f0b6dc4a4a2dba78f90c8ee7bb286f8fe94e8da7aecd9164777e08cfc9669",
+    "urdf2.1/meshes/FR_calf.STL": "8a7b92c205dea42384339a60b1c69a16e54e89ab6edf23a78cce02c3296b314e",
+    "urdf2.1/meshes/FR_foot.STL": "209aae378bb09a5ccbe417c58fc205b9289399adb2eac3acb50bf3c9328574d9",
+    "urdf2.1/meshes/FR_footmotor.STL": "fe8d5912b9678a039dc63781560a0332182bdeba75772a8827a7d0ca5f1759c9",
+    "urdf2.1/meshes/FR_hip.STL": "a6b3ea4d0702d231e60bb64530503f0a06252286a0de83e04b3c3f1e8ca80d6d",
+    "urdf2.1/meshes/FR_thigh.STL": "eb6ac634050b32c4b28568c00f22c6113b830c571cfa5e453559a59cbefb4c6d",
+    "urdf2.1/meshes/Lidar.STL": "86a6962fe86cd4fd975415538f78340560cafb943f95c243cb7f491bc0b358c2",
+    "urdf2.1/meshes/RL_calf.STL": "eaa433dfb241181ad6717e98cb4c3b54ddb23a33c800b57580cb12e955f3a221",
+    "urdf2.1/meshes/RL_foot.STL": "0643624dd71d7c07112644c8a9ebfe19171b4a6c75bf6fe6280de0bca8bac2ad",
+    "urdf2.1/meshes/RL_footmotor.STL": "5eacfd7addd7ff031f416a9e8392215036d870e65b3ade876e1b29c39aa26a7f",
+    "urdf2.1/meshes/RL_hip.STL": "1b6b6df57b2ebb310a7d391d61e2f8f9237908f25ff67accd19f9f7a3ba341b8",
+    "urdf2.1/meshes/RL_thigh.STL": "ba6d7b5d3c94434f7bcfb3833bd2b9fa6379c3a2acfcdded6c154ab26692143b",
+    "urdf2.1/meshes/RR_calf.STL": "3332598beb235df81a61bd0b2fd5da5b228571a7e681067cf55cd27829b65138",
+    "urdf2.1/meshes/RR_foot.STL": "876829df9ce4c6f2b48afd9306e37ac8ab83ea3e75c932d740be87343f234a5d",
+    "urdf2.1/meshes/RR_footmotor.STL": "5a46069b0d8fa0e9fb5e6c2ab7af44a09772c67d783a8262440b57b225a5736c",
+    "urdf2.1/meshes/RR_hip.STL": "6a040e7dd2a576ce7190b86c16d87b599b396d73c18315efafaac86d0d2937e6",
+    "urdf2.1/meshes/RR_thigh.STL": "dd1c8d1934fd366db50283a5a11d7aa203e29b980a65dc45f5b87f0238973553",
+    "urdf2.1/meshes/trunk.STL": "cce0217fe9282536952d1b77f0ace29f14cb1025eb4187322e1ac32153d95f9f",
+    "urdf2.1/package.xml": "ce1aa1c782418977f4e867384d363266177736e09a38b6aa069337ac43b4fa59",
+    "urdf2.1/urdf/nezha3_description.gv": "6b99a576afd81437e97964166dc54b106a3f75adeb4b72eaa1b25ac915f314a6",
+    "urdf2.1/urdf/nezha3_description.pdf": "76397451c3f1575f211b437fb7bf85a2412497ea998602d99b864abb6df19d75",
+    "urdf2.1/urdf/nezha3_description.urdf": "e85b5b4b137fe5a9107966a572c809dc2c3140b096f2942a6f6f0d942ca36a78"
+  },
+  "removed_robot_directories": [
+    "go2w",
+    "luntui_xml",
+    "nezha2_description1126",
+    "nezha_description1225_tf",
+    "nezha_description_20251203(Compress)",
+    "nezha_description_ycw"
+  ],
+  "config_changes": [
+    {
+      "path": "wheel_legged_gym/envs/nezha2/nezha2_config.py",
+      "before_sha256": "4b78ba924a15c184fa4c3e209bcdcdafabbe8a6755228eb09dfa54f7f5efff8c",
+      "after_sha256": "3eb7ac3a0d93965b66f08bce557a66568341d597aedad2b1fd9b60e48547fc96"
+    },
+    {
+      "path": "wheel_legged_gym/envs/nezha2_pd/nezha2_pd_config.py",
+      "before_sha256": "0d135b4c385243e0f3b9a68cc878af84072ce15ae595eaee762d73b76e51dd81",
+      "after_sha256": "e3690b47c36b79b0c447ce426c7ab7b750bd0adae8ddf28c668b859fb0808c3f"
+    },
+    {
+      "path": "wheel_legged_gym/envs/nezha2_ts_student/nezha2_config.py",
+      "before_sha256": "e8c1533bb55ee43533cc8e9a2d8782ec964338b07b45615673e76a6e558fd138",
+      "after_sha256": "0c7cb8ef1011abdeda0dca062553d01e6a071c488d71d40b4b706e7529bf77f7"
+    },
+    {
+      "path": "wheel_legged_gym/envs/nezha2_ts_student/nezha2_ts_student_config.py",
+      "before_sha256": "91df79505c8e559f079f5be6a2d0b1d9906e7b6ee7faea2bd130903d2545e288",
+      "after_sha256": "5987dc5bcd1d3a74bbf3cc5d42fce2766219b324da8d8dda4ebe67dbf5c192dd"
+    },
+    {
+      "path": "wheel_legged_gym/envs/nezha2_ts_teacher/nezha2_ts_teacher_config.py",
+      "before_sha256": "513081794e5842e3d590dbb50c646f47a2b8c333cd122a1bd2895ba8d5c33d7f",
+      "after_sha256": "9714d2c5f863f0c7c56a2b6f6e1f41bd285d03fa20d32c2f0816af2503ed2e40"
+    },
+    {
+      "path": "wheel_legged_gym/envs/nezha2_vae_github/nezha2_config.py",
+      "before_sha256": "0581ebead5a73ad0adbdfb21330ab51098b581712c388c6e8b6e2f8452e2b92b",
+      "after_sha256": "4aa38d3fe9f8258a44e75b299b33cee7e22cf86fb147613d4569dec1b5783598"
+    }
+  ],
+  "scope": "Replace robot resources and asset paths only; retain current reward, algorithm, controller and initial-state parameters.",
+  "removed_old_only_file_count": 191
+}
