@@ -263,8 +263,11 @@ class Nezha2FreeEnv(LeggedRobot):
         
         
         # 随机力矩缩放，模拟真机执行偏差（逐关节系数）
-        torque_scale = torch_rand_float(0.8, 1.1, (self.num_envs, self.num_dof), device=self.device)
-        torques = torques * torque_scale
+        # Existing training configs retain the original per-substep randomization.
+        # Independent evaluation explicitly disables it for reproducible physics.
+        if getattr(self.cfg.domain_rand, "randomize_torque_scale", True):
+            torque_scale = torch_rand_float(0.8, 1.1, (self.num_envs, self.num_dof), device=self.device)
+            torques = torques * torque_scale
 
 
         # 输出力矩用

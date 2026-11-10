@@ -11,6 +11,11 @@
 /runs/
 /wandb/
 /exports/
+/data/
+/evaluations/
+# Also cover event files and console logs outside the default output folders.
+events.out.tfevents.*
+*.log
 *.pt
 *.pth
 *.ckpt
@@ -39,6 +44,10 @@ Thumbs.db
 *.swp
 *.swo
 
+# Local cloud credentials and Codex session state
+/.aws/
+/.codex/
+
 # Local environment variables; keep shareable examples
 .env
 .env.*
@@ -46,4 +55,6 @@ Thumbs.db
 
 # Keep source/configuration files, scripts, tests, dependency locks and docs.
 # Keep resources/, including URDF, meshes (STL/OBJ/etc.), textures and JSON/YAML.
+# Keep artifacts/evaluation_terrain/ as shareable terrain illustrations.
+# Keep AGENTS.md and .agents/ if shared project instructions/skills are added.
 # Do not add blanket exclusions for *.json, *.csv or robot asset formats.

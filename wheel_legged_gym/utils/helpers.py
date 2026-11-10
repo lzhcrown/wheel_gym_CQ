@@ -178,8 +178,8 @@ def get_args(defaults=None):
         {
             "name": "--task",
             "type": str,
-            "default": "anymal_c_flat",
-            "help": "Resume training or start testing from a checkpoint. Overrides config file if provided.",
+            "default": "nezha2_mine",
+            "help": "Training task (nezha2_mine: gated modal dual encoder).",
         },
         {
             "name": "--resume",

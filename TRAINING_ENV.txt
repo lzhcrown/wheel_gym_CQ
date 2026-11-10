@@ -1,70 +1,115 @@
 Python 3.8 训练环境（uv venv）
 
-项目目录：/home/crown/wheel_gym_CQ
-虚拟环境：/home/crown/wheel_gym_CQ/.venv
+当前训练任务为门控模态双编码器 nezha2_mine，以及同一方法的五组消融。
+配置：wheel_legged_gym/envs/nezha2_mine/nezha2_mine_config.py
+网络和算法：wheel_legged_gym/algo/Mine/
+envs/nezha2 与 envs/base 是该方法继承的公共环境及配置，不是独立训练任务。
+
+五组消融的配置和逐组训练说明：
+wheel_legged_gym/experiments/mine_ablation/README.txt
+论文指标核查与可采集性分析：
+wheel_legged_gym/experiments/mine_ablation/EVALUATION_METRICS.txt
+独立Isaac Gym评估入口与CSV说明（已实现）：
+wheel_legged_gym/evaluation/README.txt
+bash scripts/evaluate_mine.sh --help
+默认6.2×6.2米测试区域，共7类（平地、凹/凸阶梯各15/20cm、±4cm粗糙面、12°坡）；
+首轮进入时开始统计，全部四轮通过且末轮从对侧离开时结束。
+当前只采公式输入：约200Hz逐关节力矩/角速度，约50Hz位置/速度/加速度及指令；
+不预设VIR阈值，不在线输出能量、COT、RMSE或成功率，事件数量仍保留。
+评估数据独立保存在evaluations/；倒车用 --speed -1，旧大区域用 --layout region。
+顺序训练五组，每组三个随机种子，共15次运行：
+bash scripts/train_mine_ablation.sh --max_iterations 10000 --seeds 10,20,30 --headless
+加 --dry-run 可只预览命令。各组训练CSV仍只导出平均奖励。
+
+项目目录：/home/bit/wheel_gym_CQ
+虚拟环境：/home/bit/wheel_gym_CQ/.venv
 Python：3.8.20
 PyTorch：2.0.1+cu118
 TorchVision：0.15.2+cu118
 NumPy：1.23.5
-Isaac Gym：本机 /home/crown/isaacgym/python，Preview 4
-全部依赖的实际版本记录在 requirements-train-py38.lock。
+TensorBoard：2.14.0；protobuf：4.25.9（保持旧版 JSON 接口兼容）
+Isaac Gym：本机 /home/bit/isaac/isaacgym/python，Preview 4
+依赖版本记录在 requirements-train-py38.lock。
 
-一、日常使用（环境已经创建，无需重复安装）
-cd /home/crown/wheel_gym_CQ
+一、训练
+cd /home/bit/wheel_gym_CQ
+bash scripts/train_mine.sh --max_iterations 10000 --headless
+
+脚本自动激活项目 .venv，只训练 nezha2_mine。也可以手动运行：
 source scripts/activate_train.sh
-python wheel_legged_gym/scripts/train.py --task exp451_est_64_64 --headless --seed 10 --num_envs 4096 --max_iterations 10000 --save_interval 100
+python wheel_legged_gym/scripts/train.py --task nezha2_mine --max_iterations 10000 --headless
 
-activate_train.sh 会执行 source .venv/bin/activate，并清除系统 ROS 的
-PYTHONPATH，设置 Python 3.8 动态库目录，以及当前环境独立的 gymtorch 编译缓存。
-退出环境用 deactivate；新的终端中重新 source scripts/activate_train.sh。
-10000 是上述命令指定的迭代数；六组对照应使用相同种子和相同训练预算。
-运行时按 Ctrl+C 停止，已经写入的 CSV 保留。训练不会自动生成图片。
+未传入覆盖参数时使用现有方法配置：4096 个并行环境、seed=10、复杂地形
+trimesh、每轮每环境采样 24 步、100000 次迭代、每 200 次迭代保存模型。
+奖励、地形课程和优化器超参数继续使用该方法原有设置。
+可通过 --num_envs、--seed、--max_iterations、--save_interval 覆盖对应参数。
+运行时按 Ctrl+C 停止；已经写入的平均奖励 CSV 会保留。
 
-二、依次运行六组
-cd /home/crown/wheel_gym_CQ
-bash scripts/train_chapter451.sh --headless
+当前网络的数据定义：
+Source encoder 与门控均读取 [o(t-1), o(t)] 两帧历史，共 130 维。
+门控结构为 130 -> 64 -> 3；Actor 直接读取最新帧 o(t) 的 65 维，
+再拼接 4 维估计量和 16 维隐特征，总输入仍为 85 维。
+辅助训练、策略采样、推理和导出共用同一套隐特征计算：各模态原型先
+分别做 L2 归一化，再按门控权重混合、逐元素调制隐特征并归一化。
+Target encoder 仅在辅助训练中读取执行动作前的当前特权帧 p(t)，
+完整输入 375 维；is_privileged_obs=True。当前 Critic 的三帧输入
+[p(t-2), p(t-1), p(t)] 仍为 1125 维，Target 取其最后 375 维。
+4 维速度/高度回归监督沿用原来的下一状态 p(t+1)，与 Target 的
+当前帧输入分开传递；回合终止时采用旧回合的终止状态监督。
+门控和 Target 首层维度已改变，旧结构检查点不能直接恢复本版网络，
+本版应从头训练；本版检查点可正常用于恢复和导出。
 
-六组均默认启用 headless，无仿真窗口；可像上面这样显式传入 --headless。
+activate_train.sh 清除系统 ROS 的 PYTHONPATH，设置 Python 3.8 动态库目录
+和当前环境独立的 gymtorch 编译缓存。新终端中需重新激活，退出用 deactivate。
 
-脚本会自动激活项目 .venv。默认每组 10000 次迭代、4096 个并行仿真环境、
-seed=10、每 100 次迭代保存一次模型。num_envs 指单组内的仿真环境数，
-六组实验本身依次执行，同一时刻只运行一组。
-顺序：baseline → critic_truth → actor_critic_truth → est_128_64 → est_64_64 → est_64_32。
-一组正常退出后才启动下一组；任意一组报错或按 Ctrl+C，整个批次停止，
-已生成的 CSV 和检查点保留。每次重新运行脚本会从第一组开始新训练。
-每组继续使用独立的 logs/chapter4_5_1/时间戳_组名/ 输出目录。
-
-统一调整六组的训练参数，例如每组训练 20000 次迭代：
-bash scripts/train_chapter451.sh --max_iterations 20000 --num_envs 4096 --seed 10 --save_interval 100
-
-仅预览命令，不激活环境、不训练：
-bash scripts/train_chapter451.sh --dry-run
-
-查看全部参数：
-bash scripts/train_chapter451.sh --help
-
-三、需要重新创建环境时
-uv venv --python 3.8.20 .venv
-uv pip install --python .venv/bin/python --index https://download.pytorch.org/whl/cu118 --index-strategy unsafe-best-match -r requirements-train-py38.lock
-uv pip install --python .venv/bin/python --no-build-isolation --no-deps -e /home/crown/isaacgym/python -e .
-uv pip check --python .venv/bin/python
-
-这些命令只操作本项目的 .venv。requirements 文件不包含机器相关的 editable
-路径，故本地 Isaac Gym 和本项目单独安装；在其他机器上需修改 Isaac Gym 路径。
-首次导入 gymtorch 会编译本机扩展，需要系统已有 C++ 编译器以及环境内的 ninja。
-
-四、CSV 数据
-自动输出目录：logs/chapter4_5_1/时间戳_组名/csv/
-平均奖励文件：Train_mean_reward.csv
+二、输出与恢复
+输出目录：logs/nezha2_mine/时间戳_rough-1/
+只导出一个奖励 CSV：csv/Train_mean_reward.csv
 CSV 三列：wall_time,step,value；保留未平滑的原始记录。
-其他奖励、损失、估计误差的文件名映射见同目录 tags.json。
-训练仍保存模型检查点、配置快照和 TensorBoard 事件，以支持恢复与核对。
-可按需要从事件文件补导出 CSV：
-python wheel_legged_gym/scripts/tensorboard_data_ex.py logs/chapter4_5_1/RUN_NAME
-该命令也支持一次传入多个运行目录。
+value 为最近最多 100 个已结束回合的平均累计回报，step 为从 0 开始的
+训练迭代号。尚无回合结束时，该指标没有数据行。
+CSV 在训练期间实时写入。TensorBoard、模型检查点、实际配置和源码快照
+也保存在本次运行目录，用于恢复和核对。
+
+从本方法最新检查点恢复：
+bash scripts/train_mine.sh --resume --max_iterations 10000 --headless
+恢复时 max_iterations 表示本次追加的训练迭代数。
+指定运行目录和检查点时增加 --load_run RUN_NAME --checkpoint ITERATION。
+
+从已有事件文件补导平均奖励 CSV：
+python wheel_legged_gym/scripts/tensorboard_data_ex.py logs/nezha2_mine/RUN_NAME
 
 MATLAB 读取示例：
-T = readtable('logs/chapter4_5_1/RUN_NAME/csv/Train_mean_reward.csv');
-% T.step 是训练迭代号，T.value 是该次记录的平均奖励。
+T = readtable('logs/nezha2_mine/RUN_NAME/csv/Train_mean_reward.csv');
+% T.step 是训练迭代号，T.value 是平均奖励。
 
-六组配置详细说明见 wheel_legged_gym/experiments/chapter4_5_1/README.txt。
+三、重新创建环境
+cd /home/bit/wheel_gym_CQ
+UV_VENV_SEED=false uv venv --cache-dir .uv-cache --python 3.8.20 .venv
+uv pip install --cache-dir .uv-cache --python .venv/bin/python --index https://download.pytorch.org/whl/cu118 --index-strategy unsafe-best-match -r requirements-train-py38.lock
+uv pip install --cache-dir .uv-cache --python .venv/bin/python --no-build-isolation --no-deps -e /home/bit/isaac/isaacgym/python -e .
+uv pip check --cache-dir .uv-cache --python .venv/bin/python
+
+虚拟环境与下载缓存分别使用项目内 .venv 和 .uv-cache。
+依赖锁文件不包含机器相关的 editable 路径；换机器时需修改 Isaac Gym 路径。
+首次导入 gymtorch 会编译本机扩展，需要系统 C++ 编译器和环境内的 ninja。
+
+四、查看训练曲线
+在新终端执行（不需停止训练）：
+cd /home/bit/wheel_gym_CQ
+source scripts/activate_train.sh
+python -m tensorboard.main --logdir logs/mine_ablation --host 127.0.0.1 --port 6008 --reload_interval 10
+本机浏览器打开 http://127.0.0.1:6008/，在 Scalars / Time Series 中选择
+Train/mean_reward，横轴 Step 表示训练迭代。勾选不同 Runs 可叠加对比。
+查看主方法的独立训练时，将 logdir 换为 logs/nezha2_mine；查看所有训练用 logs。
+端口占用时可同时修改启动命令和浏览器地址中的端口。
+
+若启动后浏览器请求报错：
+TypeError: MessageToJson() got an unexpected keyword argument 'including_default_value_fields'
+这是 TensorBoard 2.14 与 protobuf 5 的 API 不兼容。项目锁文件固定 protobuf
+4.25.9；已有环境可在项目根目录执行以下命令修复：
+uv pip install --cache-dir .uv-cache --python .venv/bin/python --no-deps 'protobuf==4.25.9'
+uv pip check --cache-dir .uv-cache --python .venv/bin/python
+随后只在运行 TensorBoard 的终端按 Ctrl+C，再执行上面的启动命令，刷新网页。
+Python 3.8 的弃用警告、TensorFlow installation not found 提示与此接口报错不同；
+当前 PyTorch 事件文件的奖励曲线不需要安装 TensorFlow。

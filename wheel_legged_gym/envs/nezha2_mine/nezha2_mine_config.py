@@ -66,6 +66,11 @@ class Nezha2CfgPPO_MINE(Nezha2CfgPPO):
         critic_hidden_dims = [512, 256, 128]
         enc_hidden_dims = [256, 128, 64, 16] # 最后一层为latent维度
         tar_hidden_dims = [256, 128, 64]
+        is_privileged_obs = True  # Target encodes the full current pre-action frame p_t (375).
+        use_state_input = True
+        use_latent_input = True
+        use_mode_gate = True
+        mode_loss_coef = 0.5
         activation = 'elu' # can be elu, relu, selu, crelu, lrelu, tanh, sigmoid
         # max_grad_norm = 1.
         max_grad_norm = 10
@@ -93,7 +98,8 @@ class Nezha2CfgPPO_MINE(Nezha2CfgPPO):
 
         # logging
         save_interval = 200 # check for potential saves every this many iterations
-        experiment_name = 'nezha2_est' # log保存路径的标识
+        experiment_name = 'nezha2_mine' # 门控模态双编码器的日志目录
+        csv_tags = ['Train/mean_reward']
         run_name = 'rough-1'
         # load and resume
         resume = False

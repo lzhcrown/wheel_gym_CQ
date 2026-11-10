@@ -177,11 +177,13 @@ class LeggedRobot(BaseTask):
                 self.torques = torques
             # print(self.torques)
             self.gym.set_dof_actuation_force_tensor(self.sim, gymtorch.unwrap_tensor(self.torques))
+            self._before_physics_substep()
             self.gym.simulate(self.sim)
             if self.device == 'cpu':
                 self.gym.fetch_results(self.sim, True)
             self.gym.refresh_dof_state_tensor(self.sim)
             self.compute_dof_vel()
+            self._after_physics_substep()
         env_ids, termination_privileged_obs = self.post_physics_step()  # 获取termination_privileged_obs(终止环境被刷新前的特权观测)
 
         # return clipped obs, clipped states (None), rewards, dones and infos
@@ -1919,6 +1921,12 @@ class LeggedRobot(BaseTask):
 
         return heights.view(self.num_envs, -1) * self.terrain.cfg.vertical_scale
     
+    def _before_physics_substep(self):
+        """Optional instrumentation after applying torque, before integration."""
+
+    def _after_physics_substep(self):
+        """Optional instrumentation after refreshing the integrated DOF state."""
+
     def pre_physics_step(self):
         self.rwd_linVelTrackPrev = self._reward_tracking_lin_vel()
         self.rwd_angVelTrackPrev = self._reward_tracking_ang_vel()

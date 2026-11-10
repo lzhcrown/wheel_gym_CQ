@@ -1,1 +1,1 @@
-"""Experiment suites grouped by research question."""
+"""Controlled experiments for the retained gated dual-encoder method."""

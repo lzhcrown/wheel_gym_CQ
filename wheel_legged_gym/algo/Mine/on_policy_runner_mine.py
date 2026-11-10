@@ -33,7 +33,7 @@ import os
 from collections import deque
 import statistics
 
-from torch.utils.tensorboard import SummaryWriter
+from wheel_legged_gym.training_metrics import TrainingSummaryWriter
 import torch
 
 from .ppo_mine import MINEPPO
@@ -65,7 +65,7 @@ class MINEOnPolicyRunner:
         actor_critic: MINEActorCritic = actor_critic_class( self.env.num_obs,
                                                         num_critic_obs,
                                                         self.env.cfg.env.num_single_obs,
-                                                        self.env.cfg.env.num_privileged_obs,
+                                                        self.env.cfg.env.single_num_privileged_obs,
                                                         self.env.cfg.env.num_est_prob,
                                                         self.env.num_actions,
                                                         **self.policy_cfg).to(self.device)
@@ -89,7 +89,9 @@ class MINEOnPolicyRunner:
     def learn(self, num_learning_iterations, init_at_random_ep_len=False):
         # initialize writer
         if self.log_dir is not None and self.writer is None:
-            self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
+            self.writer = TrainingSummaryWriter(
+                log_dir=self.log_dir, flush_secs=10,
+                csv_tags=self.cfg.get("csv_tags", ["Train/mean_reward"]))
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(self.env.episode_length_buf, high=int(self.env.max_episode_length))
         obs = self.env.get_observations()
@@ -148,12 +150,15 @@ class MINEOnPolicyRunner:
             learn_time = stop - start
             if self.log_dir is not None:
                 self.log(locals())
-            if it % self.save_interval == 0:
-                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(it)))
+            self.current_learning_iteration = it + 1
+            if self.log_dir is not None and self.current_learning_iteration % self.save_interval == 0:
+                self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
             ep_infos.clear()
         
-        self.current_learning_iteration += num_learning_iterations
-        self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
+        if self.log_dir is not None:
+            self.save(os.path.join(self.log_dir, 'model_{}.pt'.format(self.current_learning_iteration)))
+        if self.writer is not None:
+            self.writer.flush()
 
     def log(self, locs, width=80, pad=35):
         self.tot_timesteps += self.num_steps_per_env * self.env.num_envs
@@ -192,7 +197,7 @@ class MINEOnPolicyRunner:
             self.writer.add_scalar('Train/mean_reward/time', statistics.mean(locs['rewbuffer']), self.tot_time)
             self.writer.add_scalar('Train/mean_episode_length/time', statistics.mean(locs['lenbuffer']), self.tot_time)
 
-        str = f" \033[1m Learning iteration {locs['it']}/{self.current_learning_iteration + locs['num_learning_iterations']} \033[0m "
+        str = f" \033[1m Learning iteration {locs['it']}/{locs['tot_iter']} \033[0m "
 
         if len(locs['rewbuffer']) > 0:
             log_string = (f"""{'#' * width}\n"""
@@ -227,7 +232,7 @@ class MINEOnPolicyRunner:
                        f"""{'Iteration time:':>{pad}} {iteration_time:.2f}s\n"""
                        f"""{'Total time:':>{pad}} {self.tot_time:.2f}s\n"""
                        f"""{'ETA:':>{pad}} {self.tot_time / (locs['it'] + 1) * (
-                               locs['num_learning_iterations'] - locs['it']):.1f}s\n""")
+                               locs['tot_iter'] - locs['it'] - 1):.1f}s\n""")
         print(log_string)
 
     def save(self, path, infos=None):
@@ -236,20 +241,28 @@ class MINEOnPolicyRunner:
             'optimizer_state_dict': self.alg.optimizer.state_dict(),
             'estimator_optimizer_state_dict': self.alg.actor_critic.estimator.optimizer.state_dict(),
             'iter': self.current_learning_iteration,
+            'learning_rate': self.alg.learning_rate,
+            'estimator_learning_rate': self.alg.actor_critic.estimator.learning_rate,
+            'tot_timesteps': self.tot_timesteps,
+            'tot_time': self.tot_time,
             'infos': infos,
             }, path)
 
     def load(self, path, load_optimizer=True):
-        if torch.cuda.is_available():
-            device = "cuda:0"
-            print("load model on GPU")
-        loaded_dict = torch.load(path,map_location=device)
+        loaded_dict = torch.load(path, map_location=self.device)
         self.alg.actor_critic.load_state_dict(loaded_dict['model_state_dict'])
         if load_optimizer:
             self.alg.optimizer.load_state_dict(loaded_dict['optimizer_state_dict'])
             self.alg.actor_critic.estimator.optimizer.load_state_dict(loaded_dict['estimator_optimizer_state_dict'])
+            self.alg.learning_rate = loaded_dict.get(
+                'learning_rate', self.alg.optimizer.param_groups[0]['lr'])
+            self.alg.actor_critic.estimator.learning_rate = loaded_dict.get(
+                'estimator_learning_rate',
+                self.alg.actor_critic.estimator.optimizer.param_groups[0]['lr'])
         self.current_learning_iteration = loaded_dict['iter']
-        return loaded_dict['infos']
+        self.tot_timesteps = loaded_dict.get('tot_timesteps', 0)
+        self.tot_time = loaded_dict.get('tot_time', 0)
+        return loaded_dict.get('infos')
 
     def get_inference_policy(self, device=None):
         self.alg.actor_critic.eval() # switch to evaluation mode (dropout for example)

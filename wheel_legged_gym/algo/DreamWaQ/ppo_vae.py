@@ -4,13 +4,12 @@ import torch.optim as optim
 from torch.nn import functional
 from .actor_critic_vae import ActorCritic_VAE
 from .rollout_storage_vae import RolloutStorage_VAE
-from wheel_legged_gym.envs.nezha2_vae.nezha2_vae_config import  Nezha2CfgPPO_VAE
 
 class PPO_VAE:
     def __init__(
         self,
         actor_critic: ActorCritic_VAE,
-        cfg = Nezha2CfgPPO_VAE.algorithm,
+        cfg,
         device="cpu",
     ):
         self.actor_critic = actor_critic

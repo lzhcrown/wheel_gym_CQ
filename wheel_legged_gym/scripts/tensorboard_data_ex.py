@@ -1,4 +1,4 @@
-"""Export every TensorBoard scalar to raw CSV files for MATLAB or other tools."""
+"""Export raw scalar CSVs, honoring runner.csv_tags in each saved train_cfg.json."""
 import argparse
 from pathlib import Path
 import sys

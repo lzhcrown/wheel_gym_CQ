@@ -22,6 +22,8 @@ class MINEEstimator(nn.Module):
                  max_grad_norm=10.0,
                  num_prototype=32,#32
                  temperature=3.0,#3.0
+                 use_mode_gate=True,
+                 mode_loss_coef=0.5,
                  **kwargs):
         if kwargs:
             print("Estimator_CL.__init__ got unexpected arguments, which will be ignored: " + str(
@@ -32,14 +34,21 @@ class MINEEstimator(nn.Module):
         self.temporal_steps = temporal_steps
         self.num_one_step_obs = num_one_step_obs
         self.num_one_step_privileged_obs = num_one_step_privileged_obs
+        self.history_obs_dim = self.temporal_steps * self.num_one_step_obs
         self.num_latent = enc_hidden_dims[-1]
         self.max_grad_norm = max_grad_norm
         self.num_est_prob = num_est_prob
         self.is_privileged_obs = is_privileged_obs
         self.temperature = temperature
+        self.use_mode_gate = use_mode_gate
+        self.mode_loss_coef = float(mode_loss_coef)
+        if not math.isfinite(self.mode_loss_coef) or self.mode_loss_coef < 0:
+            raise ValueError("mode_loss_coef must be finite and nonnegative")
+        if not self.use_mode_gate and self.mode_loss_coef != 0:
+            raise ValueError("Disabling the mode gate also requires mode_loss_coef=0")
 
         # Encoder
-        enc_input_dim = self.temporal_steps * self.num_one_step_obs
+        enc_input_dim = self.history_obs_dim
         enc_layers = []
         for l in range(len(enc_hidden_dims) - 1):
             enc_layers += [nn.Linear(enc_input_dim, enc_hidden_dims[l]), activation]
@@ -47,10 +56,11 @@ class MINEEstimator(nn.Module):
         enc_layers += [nn.Linear(enc_input_dim, enc_hidden_dims[-1] + self.num_est_prob)]
         self.encoder = nn.Sequential(*enc_layers)
 
-        # --- 新增：Mode Gating Network ---
-        # 输入为当前时刻的单步观测，输出为 [0, 1] 之间的门控权重
+        # Instantiate every branch in every ablation to keep initialization
+        # identical. An ablated branch is bypassed and receives no gradients.
+        # Source and gate use the same history, ordered oldest to newest.
         self.mode_gate = nn.Sequential(
-            nn.Linear(self.num_one_step_obs, 64),
+            nn.Linear(self.history_obs_dim, 64),
             nn.ELU(),
             nn.Linear(64, 3) # 输出 3 个值，对应三个大类
         )
@@ -84,75 +94,55 @@ class MINEEstimator(nn.Module):
         return vel.detach(), z.detach()
 
     def forward(self, obs_history):
-        parts = self.encoder(obs_history.detach())
-        vel, z = parts[..., :self.num_est_prob], parts[..., self.num_est_prob:]
-        
-        # --- 修改：门控逻辑 ---
-        current_obs = obs_history.detach()[:, 0:self.num_one_step_obs]
-        mode_logits = self.mode_gate(current_obs)
-        mode_probs = F.softmax(mode_logits, dim=-1)
-        weighted_proto = torch.matmul(mode_probs, self.mode_prototypes)
-        z = z * weighted_proto
-        # ------------------------
-
-        z = F.normalize(z, dim=-1, p=2)
+        vel, z = self.encode(obs_history)
         return vel.detach(), z.detach()
 
     def encode(self, obs_history):
-        parts = self.encoder(obs_history.detach())
-        vel, z = parts[..., :self.num_est_prob], parts[..., self.num_est_prob:]
-        
-        # --- 修改：门控逻辑 ---
-        current_obs = obs_history.detach()[:, 0:self.num_one_step_obs]
-        mode_logits = self.mode_gate(current_obs)
-        mode_probs = F.softmax(mode_logits, dim=-1)
-        weighted_proto = torch.matmul(mode_probs, self.mode_prototypes)
-        z = z * weighted_proto
-        # ------------------------
-        
-        z = F.normalize(z, dim=-1, p=2)
+        vel, z, _, _ = self._encode_history(obs_history)
         return vel, z
 
-    def update(self, obs_history, next_critic_obs, lr=None):
+    def _encode_history(self, obs_history):
+        """Share the representation between auxiliary learning and policy use.
+
+        Normalization is differentiable and leaves the prototype parameters
+        untouched. Only forward() detaches the outputs consumed by the policy.
+        """
+        history = obs_history.detach()
+        parts = self.encoder(history)
+        vel, z = parts[..., :self.num_est_prob], parts[..., self.num_est_prob:]
+
+        if not self.use_mode_gate:
+            return vel, F.normalize(z, dim=-1, p=2), None, None
+
+        mode_logits = self.mode_gate(history)
+        mode_probs = F.softmax(mode_logits, dim=-1)
+        normalized_prototypes = F.normalize(self.mode_prototypes, dim=-1, p=2)
+        weighted_proto = mode_probs @ normalized_prototypes
+        z = F.normalize(z * weighted_proto, dim=-1, p=2)
+        return vel, z, mode_probs, normalized_prototypes
+
+    def update(self, obs_history, critic_obs, next_critic_obs, lr=None):
+        """Align history through t with the current privileged frame p_t.
+
+        State regression keeps its existing next-state velocity/height target.
+        The target encoder uses only the latest frame in the pre-action Critic
+        history, including when next_critic_obs contains a terminal snapshot.
+        """
         if lr is not None:
             self.learning_rate = lr
             for param_group in self.optimizer.param_groups:
                 param_group['lr'] = self.learning_rate
                 
-        vel = next_critic_obs[:, -self.num_est_prob:].detach()  # vel信息存在特权信息中的倒数第四到倒数第二维
+        vel = next_critic_obs[:, -self.num_est_prob:].detach()
 
+        current_privileged_frame = critic_obs.detach()[:, -self.num_one_step_privileged_obs:]
         if self.is_privileged_obs:
-            next_obs = next_critic_obs.detach()[:, -self.num_one_step_privileged_obs:]
+            target_obs = current_privileged_frame
         else:
-            next_obs = next_critic_obs.detach()[:, -self.num_one_step_privileged_obs:-self.num_one_step_privileged_obs+self.num_one_step_obs]
+            target_obs = current_privileged_frame[:, :self.num_one_step_obs]
  
-        z_s = self.encoder(obs_history)
-        z_t = self.target(next_obs)
-        pred_vel, z_s = z_s[..., :self.num_est_prob], z_s[..., self.num_est_prob:]
-
-        #当前观测
-        current_obs = obs_history.detach()[:, 0:self.num_one_step_obs]
-        # 1. 获取门控 Logits 并计算 Softmax 概率
-        mode_logits = self.mode_gate(current_obs) # [Batch, 3]
-        mode_probs = F.softmax(mode_logits, dim=-1) # [Batch, 3]
-        
-        # --- 修改点 1：使用函数式归一化，避免原地修改参数 ---
-        # 获取归一化后的模态原型，但不修改 self.mode_prototypes 本身
-        # F.normalize 返回一个新的张量，不会修改输入
-        normalized_prototypes = F.normalize(self.mode_prototypes, dim=-1, p=2)
-        
-        # 2. 计算加权模态原型
-        # 将隐变量 z 乘以对应类别的原型权重
-        # normalized_prototypes: [3, Latent_Dim]
-        # mode_probs: [Batch, 3]
-        # weighted_proto: [Batch, Latent_Dim]
-        weighted_proto = torch.matmul(mode_probs, normalized_prototypes)
-        
-        # 3. 应用门控
-        z_s = z_s * weighted_proto
-        # ------------------------
-
-        z_s = F.normalize(z_s, dim=-1, p=2)
+        pred_vel, z_s, mode_probs, normalized_prototypes = self._encode_history(obs_history)
+        z_t = self.target(target_obs)
         z_t = F.normalize(z_t, dim=-1, p=2)
 
         with torch.no_grad():
@@ -177,17 +167,11 @@ class MINEEstimator(nn.Module):
         swap_loss = -0.5 * (q_s * log_p_t + q_t * log_p_s).mean()
         estimation_loss = F.mse_loss(pred_vel, vel)
         
-        # --- 修改点 3：计算模态分类损失时也使用归一化后的原型 ---
-        # 计算隐变量 z_s 与各个模态原型的相似度
-        # z_s: [Batch, Latent_Dim], normalized_prototypes: [3, Latent_Dim]
-        # similarity: [Batch, 3]
-        similarity = torch.matmul(z_s.detach(), normalized_prototypes.T)
-        
-        # 目标是让 z_s 与其被分配到的原型（mode_probs 指向的那个）尽可能相似
-        mode_loss = F.cross_entropy(similarity, torch.argmax(mode_probs, dim=-1))
-        # ------------------------
-
-        losses = estimation_loss + swap_loss + mode_loss * 0.5 # 添加模态损失，权重可调
+        losses = estimation_loss + swap_loss
+        if self.mode_loss_coef > 0:
+            similarity = torch.matmul(z_s.detach(), normalized_prototypes.T)
+            mode_loss = F.cross_entropy(similarity, torch.argmax(mode_probs, dim=-1))
+            losses = losses + self.mode_loss_coef * mode_loss
 
         self.optimizer.zero_grad()
         losses.backward()

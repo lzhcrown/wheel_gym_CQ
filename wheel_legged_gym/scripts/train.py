@@ -58,5 +58,5 @@ def train(args):
 
 
 if __name__ == '__main__':
-    args = get_args(defaults={"task": "exp451_baseline", "headless": True})
+    args = get_args(defaults={"task": "nezha2_mine", "headless": True})
     train(args)

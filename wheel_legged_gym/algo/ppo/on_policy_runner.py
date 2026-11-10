@@ -87,7 +87,8 @@ class OnPolicyRunner:
         # initialize writer
         if self.log_dir is not None and self.writer is None:
 
-            self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10)
+            self.writer = SummaryWriter(log_dir=self.log_dir, flush_secs=10,
+                                        csv_tags=self.cfg.get("csv_tags"))
         if init_at_random_ep_len:
             self.env.episode_length_buf = torch.randint_like(
                 self.env.episode_length_buf, high=int(self.env.max_episode_length)

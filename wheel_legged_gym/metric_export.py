@@ -1,4 +1,4 @@
-"""Export all raw scalar CSVs without Isaac Gym or plotting dependencies."""
+"""Export raw scalar CSVs, respecting a run's configured CSV selection."""
 import csv
 import hashlib
 import json
@@ -13,10 +13,17 @@ def export_tensorboard(run_dir):
         raise FileNotFoundError("No TensorBoard event files in " + str(run_dir))
     accumulator = EventAccumulator(str(run_dir), size_guidance={"scalars": 0})
     accumulator.Reload()
+    config_path = run_dir / "train_cfg.json"
+    csv_tags = None
+    if config_path.exists():
+        csv_tags = json.loads(config_path.read_text()).get("runner", {}).get("csv_tags")
+    selected = None if csv_tags is None else frozenset(csv_tags)
     out = run_dir / "csv"
     out.mkdir(parents=True, exist_ok=True)
     manifest = {}
     for tag in accumulator.Tags()["scalars"]:
+        if selected is not None and tag not in selected:
+            continue
         name = re.sub(r"[^A-Za-z0-9_.-]+", "_", tag) + ".csv"
         if name in manifest.values():
             name = name[:-4] + "_" + hashlib.sha256(tag.encode()).hexdigest()[:8] + ".csv"

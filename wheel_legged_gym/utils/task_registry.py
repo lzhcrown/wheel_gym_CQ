@@ -209,7 +209,7 @@ class TaskRegistry():
             print("load_run:", train_cfg.runner.load_run )
             print("train_cfg.runner.checkpoint: ", train_cfg.runner.checkpoint)
             resume_path = get_load_path(log_root, load_run=train_cfg.runner.load_run, checkpoint=train_cfg.runner.checkpoint,
-                                        task=name if name and name.startswith("exp451_") else None)
+                                        task=name)
             print(f"Loading model from: {resume_path}")
             runner.load(resume_path)
         return runner, train_cfg

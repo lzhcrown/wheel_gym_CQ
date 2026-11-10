@@ -35,6 +35,7 @@ import torch
 import statistics
 from collections import deque
 from datetime import datetime
+from types import SimpleNamespace
 from .ppo_vae import PPO_VAE 
 from .actor_critic_vae import ActorCritic_VAE 
 from ..vec_env import VecEnv
@@ -67,7 +68,7 @@ class OnPolicyRunnerVAE:
         # print('++++++++++++++++debug',self.env.cfg.env.num_single_obs) 数值为47
         # print('++++++++debug',self.env.num_obs) 数值为47*15
         alg_class = eval(self.cfg["algorithm_class_name"])  # PPO  
-        self.alg: PPO_VAE = alg_class(actor_critic, device=self.device)
+        self.alg: PPO_VAE = alg_class(actor_critic, cfg=SimpleNamespace(**self.alg_cfg), device=self.device)
         self.num_steps_per_env = self.cfg["num_steps_per_env"]
         self.save_interval = self.cfg["save_interval"]
 

@@ -33,7 +33,9 @@ oauthlib==3.3.1
 onnx==1.17.0
 packaging==26.2
 pillow==10.4.0
-protobuf==5.29.6
+# TensorBoard 2.14 HParams uses MessageToJson(including_default_value_fields=...).
+# Protobuf 5 removes that argument; keep the Python 3.8-compatible 4.25 series.
+protobuf==4.25.9
 pyasn1==0.6.4
 pyasn1-modules==0.4.2
 pycparser==2.23

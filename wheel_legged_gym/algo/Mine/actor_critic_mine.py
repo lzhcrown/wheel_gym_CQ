@@ -36,6 +36,16 @@ from torch.distributions import Normal
 from .actor_critic import ActorCritic, get_activation
 from .estimator_mine import MINEEstimator
 
+
+def build_actor_input(obs_history, state, latent, num_one_step_obs,
+                      use_state_input=True, use_latent_input=True):
+    """Mask information channels without changing Actor size or initialization."""
+    if not use_state_input:
+        state = torch.zeros_like(state)
+    if not use_latent_input:
+        latent = torch.zeros_like(latent)
+    return torch.cat((obs_history[:, -num_one_step_obs:], state, latent), dim=-1)
+
 class RunningMeanStd:
     # Dynamically calculate mean and std
     def __init__(self, shape, device):  # shape:the dimension of input data
@@ -87,6 +97,10 @@ class MINEActorCritic(nn.Module):
                         activation='elu',
                         init_noise_std=1.0,
                         max_grad_norm=10,
+                        use_state_input=True,
+                        use_latent_input=True,
+                        use_mode_gate=True,
+                        mode_loss_coef=0.5,
                         **kwargs):
         if kwargs:
             print("ActorCritic.__init__ got unexpected arguments, which will be ignored: " + str([key for key in kwargs.keys()]))
@@ -98,6 +112,8 @@ class MINEActorCritic(nn.Module):
         self.num_actor_obs = num_actor_obs
         self.num_actions = num_actions
         self.num_one_step_obs = num_one_step_obs
+        self.use_state_input = use_state_input
+        self.use_latent_input = use_latent_input
 
         mlp_input_dim_a = num_one_step_obs + num_est_prob + enc_hidden_dims[-1] # actor的输入维度=观测的维度和source encoder的输出维度
         mlp_input_dim_c = num_critic_obs
@@ -108,7 +124,9 @@ class MINEActorCritic(nn.Module):
                                         num_one_step_privileged_obs=num_one_step_privileged_obs,
                                         enc_hidden_dims=enc_hidden_dims, tar_hidden_dims=tar_hidden_dims, num_est_prob=num_est_prob,
                                         is_privileged_obs=is_privileged_obs,
-                                        max_grad_norm=max_grad_norm)
+                                        max_grad_norm=max_grad_norm,
+                                        use_mode_gate=use_mode_gate,
+                                        mode_loss_coef=mode_loss_coef)
 
         # Policy
         actor_layers = []
@@ -178,7 +196,9 @@ class MINEActorCritic(nn.Module):
     def update_distribution(self, obs_history):
         with torch.no_grad():
             vel, latent = self.estimator(obs_history)
-        actor_input = torch.cat((obs_history[:,-self.num_one_step_obs:], vel, latent), dim=-1)
+        actor_input = build_actor_input(
+            obs_history, vel, latent, self.num_one_step_obs,
+            self.use_state_input, self.use_latent_input)
         mean = self.actor(actor_input)
         self.distribution = Normal(mean, mean*0. + self.std)
 
@@ -191,7 +211,9 @@ class MINEActorCritic(nn.Module):
 
     def act_inference(self, obs_history, observations=None):
         vel, latent = self.estimator(obs_history)
-        actions_mean = self.actor(torch.cat((obs_history[:,-self.num_one_step_obs:], vel, latent), dim=-1))
+        actions_mean = self.actor(build_actor_input(
+            obs_history, vel, latent, self.num_one_step_obs,
+            self.use_state_input, self.use_latent_input))
         return actions_mean
 
     def evaluate(self, critic_observations, **kwargs):

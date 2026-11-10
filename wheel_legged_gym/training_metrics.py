@@ -1,4 +1,4 @@
-"""TensorBoard scalars and append-only CSVs with identical raw values."""
+"""TensorBoard scalars and optional selected CSVs with identical raw values."""
 import csv
 import hashlib
 import json
@@ -9,8 +9,9 @@ from torch.utils.tensorboard import SummaryWriter
 
 
 class TrainingSummaryWriter(SummaryWriter):
-    def __init__(self, log_dir, **kwargs):
+    def __init__(self, log_dir, csv_tags=None, **kwargs):
         super().__init__(log_dir=log_dir, **kwargs)
+        self._csv_include_tags = None if csv_tags is None else frozenset(csv_tags)
         self.csv_dir = Path(self.log_dir) / "csv"
         self.csv_dir.mkdir(parents=True, exist_ok=True)
         self._csv_files = {}
@@ -20,6 +21,8 @@ class TrainingSummaryWriter(SummaryWriter):
     def add_scalar(self, tag, scalar_value, global_step=None, walltime=None, **kwargs):
         walltime = time.time() if walltime is None else walltime
         super().add_scalar(tag, scalar_value, global_step, walltime, **kwargs)
+        if self._csv_include_tags is not None and tag not in self._csv_include_tags:
+            return
         if tag not in self._csv_files:
             filename = self._csv_tags.get(tag)
             if filename is None:
