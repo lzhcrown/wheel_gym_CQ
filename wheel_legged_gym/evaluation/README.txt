@@ -9,17 +9,28 @@ Isaac Gym 6.2×6.2米地形通过测试：公式输入数据采集
 1. 测试窗口与地形
 七类地形块统一6.2×6.2m；其中阶梯中心平台3×3m，每侧8级、踏面0.2m。
 起步/退出平台在块外，各长1.5m；左右支撑各1m，完整行驶走廊为9.2×8.2m。
-前进时首排前轮进入开始，末排后轮从对侧完全离开结束；倒车时前后交换。
+首轮进入开始采集；全部四轮进入过后，末轮从允许的出口完全离开时成功结束。
 前轮已离开、后轮尚未进入的间隔仍属于同一次测试，持续记录。
 进入前的接近过程不进入运动/力矩采样CSV；未能进入的尝试仍有事件记录。
 全部采集使用同一窗口，不丢弃窗口前若干秒、不按阈值筛掉运动样本。
 
 车轮判定使用真实轮刚体姿态及URDF碰撞圆柱的世界XY投影范围，计入半径、
-宽度和姿态。全部四轮必须都从入口进入，所有四轮尾缘均超过出口
-后才成功；绕过、从侧面离开或退回入口不算成功。允许抬轮或跳越。
-机器人在外部平台上沿区域中心线初始化，起点有±0.04m的XY扰动，姿态朝向
-世界+x；反向测试从高x端倒车进入。6.2m宽区域覆盖整车轮迹，默认检查全部四轮。
+宽度和姿态。全部四轮必须进入过区域，再完整离开同一条允许出口边才成功。
+出口为对侧整条边及左右两条侧边，原入口不作为成功出口。每条边长6.2m，
+判定在真实有限边段上穿越，不能把其向外延长的直线当作出口。允许抬轮或跳越。
+以入口左下角为局部(0,0)、前进方向为+x，区域为[0,6.2]×[0,6.2]：
+  初始基座XY = (-0.75, 3.1)m；原入口x=0；
+  对侧出口x=6.2，y∈[0,6.2]；两侧出口y=0或6.2，x∈[0,6.2]。
+默认位置无随机扰动，姿态朝向世界+x；反向测试从高x端倒车进入，排除的原入口
+随方向交换。6.2m宽区域覆盖整车轮迹，默认检查全部四轮。
 实际轮子包络按所加载配置与URDF计算，不再采用旧40cm测试的单侧轮对齐。
+
+提前失败只采用摔倒判据：机身相对直立方向的倾斜角超过60°（可配置）。
+髋部接触、暂时侧移、退回入口、越出支撑走廊不再单独触发失败。退回入口不能
+获得成功，但允许重新进入后从允许出口离开；进入后的测量窗口持续记录，不重置。
+未进入过全部四轮就绕过区域不能成功，仍继续运行，直到摔倒或30s超时。
+数值/几何异常中止整次采集并保存interrupted记录，不伪装成机器人摔倒。
+同一步同时满足多个条件时，摔倒优先于成功，成功优先于超时。
 
 进入/退出在策略步末检测，默认分辨率约0.02s。首轮入块被检测到的那一帧
 作为t=0，之前区间不计入；末轮完全离开被检测到的那个控制步结束采集。
@@ -39,6 +50,19 @@ Isaac Gym 6.2×6.2米地形通过测试：公式输入数据采集
 倒车另起一轮采集：
   bash scripts/evaluate_mine.sh --task mine_ablation_full --speed -1 --headless
 
+只观看full组在20cm凸阶梯上的一次仿真，不保存采集数据：
+  bash scripts/evaluate_mine.sh --task mine_ablation_full --checkpoint 15000 --terrain-types stairs_convex_20cm --envs-per-terrain 1 --episodes-per-env 1 --seed 100 --speed 1 --max-seconds 30 --spawn-xy-jitter 0 --viewer --no-record
+--viewer只控制窗口显示，单独使用仍会保存数据；必须加--no-record才不记录。
+--no-record不创建evaluations输出目录、CSV、metadata或summary文件，正常结束、
+关闭窗口或中断时均不保存采集结果；不能同时指定--output-dir。
+仿真仍按同一初始位置、速度和成功/摔倒/超时规则运行，单次最长30s。
+若查看20cm凹阶梯，将stairs_convex_20cm替换为stairs_concave_20cm。
+只观看模式每约2秒在终端显示仿真时间、env0指令/实际前向速度及窗口刷新状态，
+结束时显示success/failure/timeout/interrupted及原因，这些信息不写入文件。
+窗口中的V键切换画面刷新：关闭刷新时图像静止，但物理仿真仍继续；再按V恢复。
+若sim_time持续增长而viewer显示refresh OFF，按V恢复；若显示refreshing且
+实际速度接近零，则需检查机器人停滞；若终端时间也长期不更新，需检查程序阻塞。
+
 --load_run为logs/mine_ablation/内的目录名；也可改用
 --checkpoint-path /绝对路径/model_10000.pt，不能同时使用两套模型选择参数。
 支持nezha2_mine，以及mine_ablation_后接full、no_latent_input、no_gate、
@@ -53,24 +77,25 @@ no_state_input、no_mode_loss。自动选择按task隔离，再取最新run/最�
   --terrain-types ...         默认下述7类；可选其中一个或多个名称，用逗号分隔
   --speed V                   机体系vx，默认+1m/s；负值倒车，vy=wz=0
   --wheel-side all             当前只允许all，全部四轮通过
-  --spawn-xy-jitter M          默认0.04m，最大0.05m
-  --max-seconds T              整次尝试含接近阶段的上限，默认1m/s时20.4s
+  --spawn-xy-jitter M          默认0，精确固定入口中点前方；显式启用时最大0.05m
+  --max-seconds T              整次尝试含接近阶段的上限，默认30s
   --step-width 0.2            标准凹/凸阶梯踏面20cm，两侧各八级
   --rough-height M            粗糙地面起伏幅度参数，默认0.04m
   --slope-angle-deg DEG       坡面角度，默认12°
   --seed N                    评估地形/起点seed，默认10；与训练seed区分
   --output-dir PATH           新目录或空目录，拒绝覆盖既有结果
-  --viewer                    显示窗口；默认headless
+  --viewer                    显示窗口；默认headless，单独使用仍保存数据
+  --no-record                 不保存任何采集数据，搭配--viewer只观看仿真
   --sim-device cpu             小规模CPU检查；默认cuda:0
   --trajectory-stride 1       仅允许1，完整记录每个控制步
   --help                      完整参数
 --vir-threshold和--warmup-seconds已移除。原始采集不允许关闭/降采样控制记录，
 否则不能完整重建阈值可调的VIR及全部时间段内的其他指标。
-默认时限按2×(区域长度+1.5m)/|指令速度|+5s计算，基于两端平台中点之间
-的路程；前进和倒车相同。可用--max-seconds显式覆盖，正式比较时各组统一。
+默认patch时限固定30s，从初始化开始计算，包含接近过程；前进和倒车相同。
+可用--max-seconds显式覆盖，正式比较时各组统一。旧region布局仍按路线长度估计。
 
 3. 输出文件与采样频率
-默认目录为evaluations/TASK/时间戳/，包含以下文件。
+未指定--no-record时，默认目录为evaluations/TASK/时间戳/，包含以下文件。
 
 physics.csv：每个活跃环境、每个物理子步一行，默认约200Hz。
   physics_step、control_step、substep_index以及time_start_s/time_end_s/dt_s；
@@ -100,6 +125,7 @@ episodes.csv：每次通过尝试一行，记录是否实际开始测试、起�
   首轮进入前失败/超时的尝试，窗口动态数据为空、样本数0，不伪造零能耗。
   空窗口/同一帧完成等无法获得物理采样的情况也保留样本数量和标记。
   入块/终止帧轮投影、起点、区域边界等原始信息保存在metadata_json。
+  exit_edge保存实际几何出口xmin/xmax/ymin/ymax；无有效出口时为空。
   wheel_contact_mask仅为轮投影重叠期间的净接触力诊断，不能定位接触点；
   不能据此认定接触发生在块上，成功判据也不强制要求接触。
 
@@ -134,9 +160,11 @@ COT：上述力矩/角速度/时间数据，加全机质量M、重力g、世界�
 不在采集阶段删除启动片段；若后续需要稳态片段，离线按时间戳统一筛选。
 
 5. 几何与比较条件
-新协议version=6，网格0.02m，竖直分辨率0.005m；块内有310×310网格间隔。
+新协议version=7，网格0.02m，竖直分辨率0.005m；块内有310×310网格间隔。
 默认七类按以下顺序生成，每类16个并行槽，共112个；同类槽使用相同地形
-几何，不同起点扰动，彼此关闭机器人碰撞。所有地形完整参数写入metadata。
+几何和精确中心起点，彼此关闭机器人碰撞。所有地形完整参数写入metadata。
+固定起点不能强制策略保持直线；同一地形重复尝试不包含人为起点扰动，也不是
+独立训练seed。metadata.terrain.exit_edge_segments_xy保存所有边段的实际世界坐标。
   flat                    平地
   stairs_concave_15cm      凹式阶梯，每级下降/上升15cm，中心深度120cm
   stairs_concave_20cm      凹式阶梯，每级下降/上升20cm，中心深度160cm
@@ -166,6 +194,28 @@ COT：上述力矩/角速度/时间数据，加全机质量M、重力g、世界�
   python scripts/plot_evaluation_terrain.py
 图像、PDF和参数来源默认写入artifacts/evaluation_terrain/，文件名见脚本输出。
 它们展示生成几何，不是策略通过性能或仿真画面截图。
+
+五组已训练模型的一致协议批量采集：
+  python3 scripts/collect_mine_ablation.py --output-dir evaluations/ablation_NEW --dry-run
+  python3 -u scripts/collect_mine_ablation.py --output-dir evaluations/ablation_NEW
+默认固定model_15000、评估seed=100、每类32个槽×5次尝试，5组共5600次。
+默认30s、起点扰动0；也可显式传入--max-seconds 30 --spawn-xy-jitter 0。
+先检查五组训练环境配置及消融开关，再锁定各组checkpoint的绝对路径和SHA256。
+逐组输出至full、no_latent_input、no_gate、no_state_input、no_mode_loss子目录。
+collection_manifest.json记录模型、命令及任务状态，event_counts.csv合并事件数量，
+不额外选择VIR阈值或计算指标。输出目录必须为空，避免覆盖已有采集。
+每组完成后，可流式校验完整性、时间连续性和差分加速度：
+  python3 scripts/validate_evaluation_capture.py evaluations/ablation_NEW/full
+校验结果写入该组data_validation.json。metadata.json另记录实际Python、PyTorch、
+CUDA、NumPy、Isaac Gym版本和GPU型号，便于区分训练机器与评估机器的软件环境。
+
+协议版本说明：旧version=6采用±4cm起点扰动、20.4s时限、仅对侧出口及额外
+提前失败规则；当前version=7采用本文的固定中心起点、30s时限和三条出口。
+旧回合提前终止后的状态没有采集，无法离线补成新规则下的完整试验。
+
+2026-11-11按用户要求，之前的全部正式/小规模仿真采集输出、CSV、校验报告、
+生成的地形图、起点出口示意图及坐标表均已删除。训练模型、训练日志和采集程序
+保留。需要结果时，使用上面的命令重新采集；地形图可由绘图脚本重新生成。
 
 6. 旧region布局（非本次七类标准测试）
 仍可用--layout region显式选择，并指定--size-m，例如：

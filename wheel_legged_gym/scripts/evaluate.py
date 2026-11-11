@@ -1,6 +1,8 @@
-"""Fixed-terrain parallel raw-data recording, separate from training reward CSV."""
+"""Fixed-terrain simulation with optional raw-data recording, separate from training."""
 import hashlib
 import json
+import platform
+from importlib.metadata import version
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
@@ -27,6 +29,56 @@ def write_metadata(output, metadata):
     temporary = output / "metadata.json.tmp"
     temporary.write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(output / "metadata.json")
+
+
+def run_without_recording(args, cfg, sim_params, model, environment_class, physics_engine):
+    """Use the same environment and termination rules with no recording sinks."""
+    import torch
+
+    env = None
+    status = "error"
+    print("Preview mode: recording disabled; no evaluation files will be created.", flush=True)
+    try:
+        env = environment_class(cfg, sim_params, physics_engine, args.sim_device, args.headless,
+                                episode_sink=None, trajectory_sink=None, physics_sink=None)
+        env.reset()
+        if not args.headless:
+            center = env.spawn_positions[0].cpu().tolist()
+            env.set_camera([center[0] - 3, center[1] - 3, center[2] + 2], center)
+            print("Viewer: V toggles image refresh only; simulation continues while refresh is off. Esc exits.", flush=True)
+        last_report = time.monotonic()
+        preview_steps = 0
+        last_viewer_sync = env.enable_viewer_sync
+        with torch.inference_mode():
+            while not env.evaluation_complete:
+                env.step(model.act_inference(env.get_observations()))
+                preview_steps += 1
+                viewer_changed = env.enable_viewer_sync != last_viewer_sync
+                if time.monotonic() - last_report >= 2 or viewer_changed:
+                    viewer_state = ("headless" if env.viewer is None else
+                                    "refreshing" if env.enable_viewer_sync else "refresh OFF (press V in viewer to resume)")
+                    print("Preview: sim_time={:.2f}s; env0 command_vx={:.3f}m/s, actual_vx={:.3f}m/s; viewer={}; completed={} (not saved)".format(
+                        preview_steps * env.dt, float(env.commands[0, 0]), float(env.base_lin_vel[0, 0]),
+                        viewer_state, len(env.completed_episodes)), flush=True)
+                    last_report = time.monotonic()
+                last_viewer_sync = env.enable_viewer_sync
+        status = "complete"
+    except (KeyboardInterrupt, SystemExit):
+        status = "interrupted"
+    finally:
+        if env is not None:
+            try:
+                if status != "complete":
+                    env.interrupt(reason="preview_" + status)
+                for row in env.completed_episodes:
+                    print("Preview result: env={env_id}, terrain={terrain}, status={status}, reason={reason}, trial_elapsed_s={elapsed} (not saved)".format(
+                        elapsed=row.get("trial_elapsed_s", row.get("elapsed_s")), **row), flush=True)
+            finally:
+                if env.viewer is not None:
+                    env.gym.destroy_viewer(env.viewer)
+                env.gym.destroy_sim(env.sim)
+    print("Preview {}. No evaluation files saved.".format(status), flush=True)
+    return 0 if status == "complete" else 130
 
 
 def evaluate(args):
@@ -80,6 +132,10 @@ def evaluate(args):
                                use_gpu=args.sim_device.startswith("cuda"), subscenes=0,
                                use_gpu_pipeline=args.sim_device.startswith("cuda"), num_threads=args.num_threads)
     sim_params = parse_sim_params(sim_args, {"sim": class_to_dict(cfg.sim)})
+    if args.no_record:
+        print("Checkpoint: {}".format(checkpoint))
+        environment_class = PatchEvaluationEnv if args.layout == "patch" else EvaluationEnv
+        return run_without_recording(args, cfg, sim_params, model, environment_class, gymapi.SIM_PHYSX)
     output = args.output_dir or ROOT / "evaluations" / args.task / datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     output = output.expanduser().resolve()
     if output.exists() and any(output.iterdir()):
@@ -98,6 +154,12 @@ def evaluate(args):
                   "angular_velocity": "rad/s", "joint_torque": "N*m", "time": "s", "mass": "kg"},
         "gravity_vector_m_s2": [sim_params.gravity.x, sim_params.gravity.y, sim_params.gravity.z],
         "sim_device": args.sim_device,
+        "runtime": {
+            "python": platform.python_version(), "python_executable": sys.executable,
+            "torch": torch.__version__, "torch_cuda": torch.version.cuda,
+            "numpy": version("numpy"), "isaacgym": version("isaacgym"),
+            "gpu": torch.cuda.get_device_name(args.sim_device) if args.sim_device.startswith("cuda") else None,
+        },
         "source_sha256": {str(path.relative_to(ROOT)): sha256(path) for path in (
             Path(__file__).resolve(), ROOT / "wheel_legged_gym/evaluation/config.py",
             ROOT / "wheel_legged_gym/evaluation/env.py", ROOT / "wheel_legged_gym/evaluation/terrain.py",

@@ -24,13 +24,16 @@ class WheelWindowCrossing:
     counted solely because the robot base passes it.
     """
 
-    def __init__(self, num_envs, device, tolerance_m=1e-7):
+    def __init__(self, num_envs, device, tolerance_m=1e-7, exit_rule="opposite"):
         if int(num_envs) != num_envs or num_envs <= 0:
             raise ValueError("num_envs must be a positive integer")
         if not 0 <= float(tolerance_m) < 1e-3:
             raise ValueError("tolerance_m must be nonnegative and less than 1 mm")
         self.num_envs, self.device = int(num_envs), torch.device(device)
         self.tolerance_m = float(tolerance_m)
+        if exit_rule not in ("opposite", "opposite_or_sides"):
+            raise ValueError("Unknown exit rule")
+        self.exit_rule = exit_rule
         self.active = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
         self.window_started = self.active.clone()
         self.wheels_entered_mask = torch.zeros((self.num_envs, 4), device=self.device, dtype=torch.bool)
@@ -45,6 +48,9 @@ class WheelWindowCrossing:
         self.entry_time_s = torch.full((self.num_envs,), float("nan"), device=self.device, dtype=torch.float64)
         self.exit_time_s = self.entry_time_s.clone()
         self.previous_time_s = torch.zeros(self.num_envs, device=self.device, dtype=torch.float64)
+        # xmin, xmax, ymin, ymax: valid outward crossings for each wheel.
+        self.wheel_exit_edges = torch.zeros((self.num_envs, 4, 4), device=self.device, dtype=torch.bool)
+        self.exit_edge_code = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
 
     def _tensor(self, value, shape, name, dtype=torch.float64):
         value = torch.as_tensor(value, dtype=dtype, device=self.device)
@@ -113,7 +119,78 @@ class WheelWindowCrossing:
         self.entry_time_s[ids] = float("nan")
         self.exit_time_s[ids] = float("nan")
         self.previous_time_s[ids] = 0.
+        self.wheel_exit_edges[ids] = False
+        self.exit_edge_code[ids] = 0
         self.active[ids] = True
+
+    def _update_passage(self, bounds, elapsed, contact, valid):
+        """Protocol 7: enter the rectangle, then clear a non-entry edge.
+
+        Retreat/side motion never ends an attempt. Each wheel must have entered;
+        exit crossings must intersect the finite edge segment. A robot returning
+        through the original entrance can re-enter and try again until timeout.
+        """
+        p = self.window_bounds[:, None, :]
+        previous = self.previous_wheel_bounds
+        # Swept linear AABB overlap catches entry between two control samples.
+        # As in the legacy tracker this is an approximation between sampled poses.
+        start = torch.stack((previous[..., 1] - p[..., 0], p[..., 1] - previous[..., 0],
+                             previous[..., 3] - p[..., 2], p[..., 3] - previous[..., 2]), dim=-1)
+        end = torch.stack((bounds[..., 1] - p[..., 0], p[..., 1] - bounds[..., 0],
+                           bounds[..., 3] - p[..., 2], p[..., 3] - bounds[..., 2]), dim=-1)
+        change = end - start
+        moving = change.abs() > 1e-12
+        crossing = -start / torch.where(moving, change, torch.ones_like(change))
+        lower = torch.where(change > 1e-12, crossing, torch.zeros_like(crossing)).amax(dim=-1).clamp_min(0.)
+        upper = torch.where(change < -1e-12, crossing, torch.ones_like(crossing)).amin(dim=-1).clamp_max(1.)
+        overlaps = (lower <= upper) & ((moving | (start >= 0.)).all(dim=-1))
+        new_entry = self.active[:, None] & valid[:, None] & ~self.wheels_entered_mask & overlaps
+        selected_entry = new_entry & self.selected_pair_mask
+        entered = self.active & ~self.window_started & selected_entry.any(dim=1)
+        first = torch.where(selected_entry, lower, torch.full_like(lower, float("inf"))).argmin(dim=1)
+        self.leading_axle = torch.where(entered, first // 2, self.leading_axle)
+        self.entry_time_s = torch.where(entered, elapsed, self.entry_time_s)
+        self.window_started |= entered
+        self.wheels_entered_mask |= new_entry
+        overlap_now = (end >= 0.).all(dim=-1)
+        self.wheel_contact_mask |= contact & overlap_now & self.active[:, None] & valid[:, None]
+
+        clear_edges = []
+        # A wheel clears an edge only when its trailing extremity crosses it.
+        for edge, axis, sign in ((0, 0, -1), (1, 0, 1), (2, 1, -1), (3, 1, 1)):
+            trailing_index = 2 * axis + (1 if sign < 0 else 0)
+            plane = sign * self.window_bounds[:, edge, None]
+            before = sign * previous[..., trailing_index]
+            after = sign * bounds[..., trailing_index]
+            delta = after - before
+            fraction = ((plane - before) / delta.clamp_min(1e-12)).clamp(0., 1.)
+            orthogonal = 2 * (1 - axis)
+            edge_bounds = previous[..., orthogonal:orthogonal + 2] + fraction[..., None] * (
+                bounds[..., orthogonal:orthogonal + 2] - previous[..., orthogonal:orthogonal + 2])
+            finite_edge = ((edge_bounds[..., 1] >= p[..., orthogonal]) &
+                           (edge_bounds[..., 0] <= p[..., orthogonal + 1]))
+            clear = after >= plane - self.tolerance_m
+            crossed = ((before < plane - self.tolerance_m) & clear & (delta > 0) & finite_edge &
+                       self.wheels_entered_mask & self.active[:, None] & valid[:, None])
+            self.wheel_exit_edges[:, :, edge] = (self.wheel_exit_edges[:, :, edge] | crossed) & clear
+            valid_exits = (self.wheel_exit_edges[:, :, edge] | ~self.selected_pair_mask).all(dim=1)
+            allowed = ((self.travel_direction < 0) if edge == 0 else
+                       (self.travel_direction > 0) if edge == 1 else torch.ones_like(self.active))
+            clear_edges.append(clear.all(dim=1) & valid_exits & allowed)
+        cleared = torch.stack(clear_edges, dim=1)
+        all_entered = (self.wheels_entered_mask | ~self.selected_pair_mask).all(dim=1)
+        failed = self.active & ~valid  # Numerical errors are handled separately by the environment.
+        exited = self.active & self.window_started & all_entered & cleared.any(dim=1) & valid
+        self.exit_edge_code = torch.where(exited, cleared.long().argmax(dim=1) + 1, self.exit_edge_code)
+        self.exit_time_s = torch.where(exited, elapsed, self.exit_time_s)
+        self.reason_code = torch.where(failed, 3, self.reason_code)
+        self.previous_wheel_bounds = torch.where(self.active[:, None, None], bounds, previous)
+        self.previous_time_s = torch.where(self.active, elapsed, self.previous_time_s)
+        self.active &= ~(exited | failed)
+        return dict(entered=entered, exited=exited, failed=failed, reason_code=self.reason_code,
+                    window_started=self.window_started, entry_time_s=self.entry_time_s,
+                    exit_time_s=self.exit_time_s, leading_axle=self.leading_axle,
+                    wheels_entered_mask=self.wheels_entered_mask, wheel_contact_mask=self.wheel_contact_mask)
 
     @torch.no_grad()
     def update(self, wheel_bounds, trial_elapsed_s, wheel_contact_mask=None):
@@ -133,6 +210,8 @@ class WheelWindowCrossing:
                  & (elapsed >= self.previous_time_s)
                  & (bounds[:, :, 1] >= bounds[:, :, 0]).all(dim=1)
                  & (bounds[:, :, 3] >= bounds[:, :, 2]).all(dim=1))
+        if self.exit_rule == "opposite_or_sides":
+            return self._update_passage(bounds, elapsed, contact, valid)
         entrance = torch.where(self.travel_direction > 0, self.window_bounds[:, 0], -self.window_bounds[:, 1])
         exit_plane = torch.where(self.travel_direction > 0, self.window_bounds[:, 1], -self.window_bounds[:, 0])
         leading, trailing = self._longitudinal(bounds, self.travel_direction)

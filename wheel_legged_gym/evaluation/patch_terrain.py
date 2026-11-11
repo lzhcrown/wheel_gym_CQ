@@ -193,12 +193,20 @@ class PatchEvaluationTerrain(EvaluationTerrain):
             "wheel_geometry": dict(self.wheel_geometry), "wheel_geometry_source": geometry_source,
             "wheel_geometry_fallback_fields": fallback_fields,
             "heading_yaw_rad": 0., "motion": "signed world x; negative direction is backward motion",
-            "spawn_alignment": "base center on ROI centerline, with bounded xy jitter; whole wheel envelope inside ROI laterally",
+            "spawn_alignment": "base 0.75 m in front of entry-edge midpoint; yaw=0; optional explicitly configured XY jitter",
+            "spawn_xy_jitter_m": float(getattr(cfg, "spawn_xy_jitter", 0.)),
             "legacy_side_argument": "left/right are accepted as aliases of center; no wheel-track translation",
             "outside_support": "flat for non-slope tiles; slope x-profile extends across full corridor width, endpoint heights continue over pads and exterior border; tile gaps interpolate edge heights",
             "transition_note": "Concentric stairs have {} risers per side and return to zero at the ROI edge. Roughness has a zero boundary ring. The slope has no forced return: its high end continues onto an equal-height platform.".format(self.parameters["steps_per_side"]),
             "transition_in_measurement_window": True,
-            "measurement_window": "first wheel enters ROI through entry edge until all four wheels leave the opposite edge; includes the gap between front and rear axles",
+            "measurement_window": "first wheel enters ROI until all four wheels leave an allowed edge after entry, or fall/timeout; opposite and lateral exits allowed, original entrance excluded",
+            "exit_edge_segments_xy": {
+                name: [{"xmin": [[float(x0), float(y0)], [float(x0), float(y1)]],
+                        "xmax": [[float(x1), float(y0)], [float(x1), float(y1)]],
+                        "ymin": [[float(x0), float(y0)], [float(x1), float(y0)]],
+                        "ymax": [[float(x0), float(y1)], [float(x1), float(y1)]]}[name]
+                       for x0, x1, y0, y1 in self.patch_bounds]
+                for name in ("xmin", "xmax", "ymin", "ymax")},
         }
         if self.type == "trimesh":
             from isaacgym import terrain_utils
@@ -261,7 +269,7 @@ class PatchEvaluationTerrain(EvaluationTerrain):
                                                      and np.all(quantized[:, [0, -1]] == 0)))
         return patch, description
 
-    def sample_spawns(self, type_ids, rng, direction=1, side="center", xy_jitter=.04):
+    def sample_spawns(self, type_ids, rng, direction=1, side="center", xy_jitter=0.):
         """Place the whole robot on an external pad along the ROI centerline.
 
         Offsets use the heading-zero body frame, even when driving backward.

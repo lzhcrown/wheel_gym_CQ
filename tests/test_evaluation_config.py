@@ -23,13 +23,26 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class EvaluationConfigTests(unittest.TestCase):
+    def test_no_record_disables_file_outputs_and_rejects_output_directory(self):
+        args = parse_args(["--viewer", "--no-record", "--terrain-types", "stairs_convex_20cm"])
+        self.assertFalse(args.headless)
+        self.assertTrue(args.no_record)
+        protocol = protocol_dict(args)
+        self.assertEqual(protocol["data_mode"], "preview_no_record")
+        self.assertFalse(protocol["write_files"])
+        self.assertEqual(protocol["recording"], "disabled")
+        self.assertFalse(parse_args([]).no_record)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parse_args(["--no-record", "--output-dir", "unused"])
+
     def test_local_patch_is_default_and_uses_the_entire_crossing_window(self):
         args = parse_args([])
         self.assertEqual(args.layout, "patch")
         self.assertEqual(args.size_m, 6.2)
         self.assertFalse(hasattr(args, "warmup_seconds"))
         self.assertFalse(hasattr(args, "vir_threshold"))
-        self.assertAlmostEqual(args.max_seconds, 20.4)
+        self.assertAlmostEqual(args.max_seconds, 30.)
+        self.assertEqual(args.spawn_xy_jitter, 0.)
         self.assertEqual(args.wheel_side, "all")
         self.assertEqual(args.terrain_types, ("flat", "stairs_concave_15cm", "stairs_concave_20cm",
                          "stairs_convex_15cm", "stairs_convex_20cm", "rough", "slope"))
@@ -41,7 +54,10 @@ class EvaluationConfigTests(unittest.TestCase):
         self.assertFalse(protocol["entry_requires_contact"])
         self.assertEqual(protocol["data_mode"], "raw_formula_inputs")
         self.assertEqual(protocol["total_episodes"], 112)
-        self.assertEqual(protocol["version"], 6)
+        self.assertEqual(protocol["version"], 7)
+        self.assertEqual(protocol["allowed_exit_edges"], ["xmax", "ymin", "ymax"])
+        self.assertEqual(protocol["spawn_distance_before_entry_m"], .75)
+        self.assertIn("fall only", protocol["failure_rule"])
         self.assertEqual(protocol["stair_geometry"]["steps_per_side"], 8)
         self.assertEqual(protocol["stair_geometry"]["tread_width_m"], .2)
         self.assertEqual(protocol["stair_geometry"]["central_platform_size_m"], 3.)
@@ -52,10 +68,11 @@ class EvaluationConfigTests(unittest.TestCase):
         self.assertNotIn("obstacle_height", protocol["terrain_parameters"])
         self.assertNotIn("vir_threshold_mps2", protocol)
         reverse = parse_args(["--speed", "-1"])
-        self.assertAlmostEqual(reverse.max_seconds, 20.4)
-        self.assertAlmostEqual(parse_args(["--speed", ".5"]).max_seconds, 35.8)
+        self.assertAlmostEqual(reverse.max_seconds, 30.)
+        self.assertAlmostEqual(parse_args(["--speed", ".5"]).max_seconds, 30.)
         self.assertEqual(parse_args(["--max-seconds", "45"]).max_seconds, 45.)
         self.assertEqual(protocol_dict(reverse)["entry_edge"], "xmax")
+        self.assertEqual(protocol_dict(reverse)["allowed_exit_edges"], ["xmin", "ymin", "ymax"])
         self.assertEqual(protocol_dict(reverse)["travel_direction"], "-x")
         for invalid in (["--size-m", "40"], ["--speed", "0"],
                         ["--spawn-xy-jitter", ".1"], ["--size-m", "3"],

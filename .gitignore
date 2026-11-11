@@ -7,12 +7,14 @@
 
 # Training logs, generated data, videos and exported policies
 /logs/
+/logs.zip
 /videos/
 /runs/
 /wandb/
 /exports/
 /data/
 /evaluations/
+/artifacts/evaluation_terrain/
 # Also cover event files and console logs outside the default output folders.
 events.out.tfevents.*
 *.log
@@ -38,6 +40,8 @@ __pycache__/
 # Machine-specific editor settings and temporary files
 /.vscode/
 /.idea/
+/.marscode/
+/tmp/
 .DS_Store
 Thumbs.db
 *~
@@ -55,6 +59,6 @@ Thumbs.db
 
 # Keep source/configuration files, scripts, tests, dependency locks and docs.
 # Keep resources/, including URDF, meshes (STL/OBJ/etc.), textures and JSON/YAML.
-# Keep artifacts/evaluation_terrain/ as shareable terrain illustrations.
+# Terrain illustrations under artifacts/evaluation_terrain/ are regenerated locally.
 # Keep AGENTS.md and .agents/ if shared project instructions/skills are added.
 # Do not add blanket exclusions for *.json, *.csv or robot asset formats.

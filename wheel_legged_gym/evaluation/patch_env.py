@@ -6,7 +6,6 @@ from isaacgym import gymtorch
 from isaacgym.torch_utils import quat_apply
 import torch
 
-from wheel_legged_gym.envs.nezha2.legged_robot import LeggedRobot
 from wheel_legged_gym.envs.nezha2.nezha2_env import Nezha2FreeEnv
 from .crossing import WheelWindowCrossing
 from .env import EvaluationEnv
@@ -62,7 +61,7 @@ class PatchEvaluationEnv(EvaluationEnv):
                      "center_offsets", "default_half_extents"):
             setattr(self, "_wheel_" + name, torch.tensor(self.wheel_geometry[name],
                                                         dtype=torch.float, device=self.device))
-        self.crossing = WheelWindowCrossing(self.num_envs, self.device)
+        self.crossing = WheelWindowCrossing(self.num_envs, self.device, exit_rule="opposite_or_sides")
         self.attempt_active = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         self._attempt_metadata = [{} for _ in range(self.num_envs)]
 
@@ -98,7 +97,7 @@ class PatchEvaluationEnv(EvaluationEnv):
             sample = self.terrain.sample_spawns(
                 np.asarray([int(self.terrain_types[env_id])]), self._spawn_rngs[env_id],
                 direction=sign, side=spawn_side,
-                xy_jitter=float(getattr(self.evaluation, "spawn_xy_jitter", .04)))
+                xy_jitter=float(getattr(self.evaluation, "spawn_xy_jitter", 0.)))
             ground = torch.as_tensor(sample["ground_positions"][0], device=self.device,
                                      dtype=self.root_states.dtype)
             self.root_states[env_id] = self.base_init_state
@@ -192,6 +191,7 @@ class PatchEvaluationEnv(EvaluationEnv):
                 item["leading_axle"] = "front" if self.crossing.leading_axle[env_id] == 0 else "rear"
             exit_time = float(self.crossing.exit_time_s[env_id])
             item["exit_time_s"] = exit_time if math.isfinite(exit_time) and exit_time >= 0 else None
+            item["exit_edge"] = (None, "xmin", "xmax", "ymin", "ymax")[int(self.crossing.exit_edge_code[env_id])]
             if bool(self.metrics.active[env_id]):
                 self.metrics.metadata[env_id].update(item)
 
@@ -215,27 +215,28 @@ class PatchEvaluationEnv(EvaluationEnv):
             metadata=[self._attempt_metadata[env_id] for env_id in env_ids.tolist()])
 
     def check_termination(self):
-        LeggedRobot.check_termination(self)
         if self.crossing is None or not self._evaluation_started:
             return
         bounds, contact = self._current_wheel_geometry()
+        invalid = ~torch.isfinite(self.root_states).all(dim=1) | ~torch.isfinite(bounds).all(dim=2).all(dim=1)
+        if bool((invalid & self.attempt_active).any()):
+            raise RuntimeError("Nonfinite evaluation state/geometry; stop collection instead of counting a fall")
         event = self.crossing.update(bounds, self.episode_length_buf.to(torch.float64) * self.dt, contact)
+        if bool((event["failed"] & self.attempt_active).any()):
+            raise RuntimeError("Invalid evaluation geometry/clock; stop collection instead of counting a fall")
         self._update_window_metadata(bounds)
         # Only already-active windows record this control interval's raw state.
         self.metrics.control_step(self.root_states[:, :3], self.root_states[:, 7:10],
                                   self.base_lin_vel, self.base_ang_vel, self._step_commands, self.dt,
                                   orientation_world=self.root_states[:, 3:7],
                                   angular_velocity_world=self.root_states[:, 10:13])
-        invalid = ~torch.isfinite(self.root_states).all(dim=1)
-        entering = event["entered"] & self.attempt_active & ~invalid
+        entering = event["entered"] & self.attempt_active
         self._begin_measurements(entering.nonzero(as_tuple=False).flatten())
-        position, corridor = self.root_states[:, :3], self.traversal_bounds
-        outside = ((position[:, 0] < corridor[:, 0]) | (position[:, 0] > corridor[:, 1]) |
-                   (position[:, 1] < corridor[:, 2]) | (position[:, 1] > corridor[:, 3]))
         tilted = self.projected_gravity[:, 2] > -math.cos(math.radians(
             float(getattr(self.evaluation, "max_tilt_deg", 60.))))
-        fall = (self.fail_buf > self.cfg.env.fail_to_terminal_time_s / self.dt) | tilted
-        failure = fall | outside | invalid | event["failed"]
+        # Protocol 7 defines a fall by base tilt only. Contacts, retreat and
+        # corridor departure do not terminate the attempt; it may recover.
+        failure = tilted
         success = event["exited"] & ~failure
         timeout = (self.episode_length_buf >= self.max_episode_length) & ~failure & ~success
         self.reset_buf = (failure | success | timeout) & self.attempt_active
@@ -243,11 +244,7 @@ class PatchEvaluationEnv(EvaluationEnv):
         for env_id in self.reset_buf.nonzero(as_tuple=False).flatten().tolist():
             if failure[env_id]:
                 self._episode_status[env_id] = "failure"
-                code = int(event["reason_code"][env_id])
-                self._episode_reason[env_id] = ("nonfinite_state" if invalid[env_id] else
-                                                "out_of_corridor" if outside[env_id] else
-                                                "fall" if fall[env_id] else
-                                                {1: "bypass", 2: "retreat", 3: "invalid_geometry"}.get(code, "bypass"))
+                self._episode_reason[env_id] = "fall"
             else:
                 self._episode_status[env_id] = "success" if success[env_id] else "timeout"
                 self._episode_reason[env_id] = "all_wheels_cleared" if success[env_id] else "time_limit"

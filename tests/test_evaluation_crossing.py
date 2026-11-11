@@ -245,5 +245,92 @@ class EvaluationCrossingTests(unittest.TestCase):
                         selected_side=0, wheel_bounds=wheel_bounds(.1, -.7))
 
 
+class PassageExitTests(unittest.TestCase):
+    def tracker(self, direction=1):
+        state = WheelWindowCrossing(1, "cpu", exit_rule="opposite_or_sides")
+        state.reset([0], window_bounds=[[0., 3., -1.5, 1.5]], travel_direction=direction,
+                    selected_side=2, wheel_bounds=wide_wheel_bounds(-.4, -1.2) if direction == 1
+                    else wide_wheel_bounds(4.2, 3.4))
+        return state
+
+    def test_both_lateral_edges_work_in_both_directions_after_last_wheel_clears(self):
+        for direction in (1, -1):
+            for side in (-1, 1):
+                state = self.tracker(direction)
+                inside = wide_wheel_bounds(1.3, .5)
+                state.update(inside, .02)
+                partial = inside.clone()
+                partial[..., 2:] += side * 1.4
+                event = state.update(partial, .04)
+                self.assertFalse(event["exited"][0])
+                final = inside.clone()
+                final[..., 2:] += side * 2.
+                event = state.update(final, .06)
+                self.assertTrue(event["exited"][0])
+                self.assertEqual(int(state.exit_edge_code[0]), 3 if side < 0 else 4)
+
+    def test_original_entrance_is_excluded_and_retreat_allows_a_new_attempt_to_exit(self):
+        for direction in (1, -1):
+            state = self.tracker(direction)
+            state.update(wide_wheel_bounds(1.3, .5), .02)
+            retreat = wide_wheel_bounds(-.4, -1.2) if direction == 1 else wide_wheel_bounds(4.2, 3.4)
+            event = state.update(retreat, .04)
+            self.assertFalse(event["failed"][0] or event["exited"][0])
+            self.assertTrue(state.active[0])
+            state.update(wide_wheel_bounds(1.3, .5), .06)
+            final = wide_wheel_bounds(4.2, 3.4) if direction == 1 else wide_wheel_bounds(-.4, -1.2)
+            event = state.update(final, .08)
+            self.assertTrue(event["exited"][0])
+            self.assertEqual(int(state.exit_edge_code[0]), 2 if direction == 1 else 1)
+
+    def test_partial_entry_and_never_entered_bypass_are_not_success_or_failure(self):
+        state = self.tracker()
+        state.update(wide_wheel_bounds(-.05, -.85), .02)
+        side = wide_wheel_bounds(-.05, -.85)
+        side[..., 2:] += 2.
+        event = state.update(side, .04)
+        self.assertFalse(event["failed"][0] or event["exited"][0])
+        self.assertFalse(state.wheels_entered_mask.all())
+        state = self.tracker()
+        before = wide_wheel_bounds(-.4, -1.2)
+        before[..., 2:] += 4.
+        state.update(before, .02)
+        after = wide_wheel_bounds(4.2, 3.4)
+        after[..., 2:] += 4.
+        event = state.update(after, .04)
+        self.assertFalse(event["entered"][0] or event["exited"][0] or event["failed"][0])
+
+    def test_extending_an_exit_line_beyond_its_segment_does_not_count(self):
+        state = self.tracker()
+        state.update(wide_wheel_bounds(1.3, .5), .02)
+        # Leave by the excluded entrance, then move left-to-right above the ROI.
+        state.update(wide_wheel_bounds(-.4, -1.2), .04)
+        side = wide_wheel_bounds(-.4, -1.2)
+        side[..., 2:] += 4.
+        state.update(side, .06)
+        far = wide_wheel_bounds(4.2, 3.4)
+        far[..., 2:] += 4.
+        event = state.update(far, .08)
+        self.assertFalse(event["exited"][0] or event["failed"][0])
+        self.assertTrue(state.active[0])
+
+    def test_entry_from_a_side_counts_as_actual_entry_and_reset_clears_exit_history(self):
+        state = self.tracker()
+        side = wide_wheel_bounds(-.4, -1.2)
+        side[..., 2:] += 4.
+        state.update(side, .02)
+        side = wide_wheel_bounds(1.3, .5)
+        side[..., 2:] += 4.
+        state.update(side, .04)
+        state.update(wide_wheel_bounds(1.3, .5), .06)
+        self.assertTrue(state.wheels_entered_mask.all())
+        event = state.update(wide_wheel_bounds(4.2, 3.4), .08)
+        self.assertTrue(event["exited"][0])
+        state.reset([0], window_bounds=[[0., 3., -1.5, 1.5]], travel_direction=1,
+                    selected_side=2, wheel_bounds=wide_wheel_bounds(-.4, -1.2))
+        self.assertFalse(state.wheel_exit_edges.any())
+        self.assertEqual(int(state.exit_edge_code[0]), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

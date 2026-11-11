@@ -13,7 +13,8 @@ wheel_legged_gym/experiments/mine_ablation/EVALUATION_METRICS.txt
 wheel_legged_gym/evaluation/README.txt
 bash scripts/evaluate_mine.sh --help
 默认6.2×6.2米测试区域，共7类（平地、凹/凸阶梯各15/20cm、±4cm粗糙面、12°坡）；
-首轮进入时开始统计，全部四轮通过且末轮从对侧离开时结束。
+首轮进入时开始统计，四轮都进入过后从对侧或左右侧边完整离开即成功；原入口除外。
+默认起点为入口边界中点前方0.75m，XY扰动0；时限30s，提前失败只判机身倾斜超过60°。
 当前只采公式输入：约200Hz逐关节力矩/角速度，约50Hz位置/速度/加速度及指令；
 不预设VIR阈值，不在线输出能量、COT、RMSE或成功率，事件数量仍保留。
 评估数据独立保存在evaluations/；倒车用 --speed -1，旧大区域用 --layout region。

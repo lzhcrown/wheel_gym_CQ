@@ -27,6 +27,8 @@ def parse_args(argv=None):
     parser.add_argument("--allow-current-config", action="store_true",
                         help="Explicitly use current task configs for a legacy run without complete config snapshots")
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--no-record", action="store_true",
+                        help="Run without creating evaluation directories, CSV, metadata or summary files; combine with --viewer to watch")
     parser.add_argument("--layout", choices=("patch", "region"), default="patch",
                         help="patch: wheel-entry/last-wheel-exit window around a local square; region: legacy large-region evaluation")
     parser.add_argument("--size-m", type=float,
@@ -39,7 +41,7 @@ def parse_args(argv=None):
     parser.add_argument("--speed", type=float, default=1.0,
                         help="Constant body-frame vx, m/s; negative values evaluate rear-first reverse travel in patch mode")
     parser.add_argument("--max-seconds", type=float,
-                        help="Whole attempt limit including approach: default twice nominal platform-to-platform travel time plus 5 s")
+                        help="Whole attempt limit including approach: patch defaults to 30 s; legacy region uses its route length")
     parser.add_argument("--trajectory-stride", type=int, choices=(1,), default=1,
                         help="Raw capture requires every control step (1); all physics substeps are also recorded")
     parser.add_argument("--spawn-inset", type=float, default=0.75)
@@ -47,8 +49,8 @@ def parse_args(argv=None):
     parser.add_argument("--lateral-margin", type=float, default=0.75)
     parser.add_argument("--wheel-side", choices=("all",), default="all",
                         help="All four wheels must enter and cross the test area")
-    parser.add_argument("--spawn-xy-jitter", type=float, default=.04,
-                        help="Initial XY jitter in metres around the centered approach")
+    parser.add_argument("--spawn-xy-jitter", type=float, default=0.,
+                        help="Initial XY jitter in metres; default 0 fixes the base in front of the entry-edge midpoint")
     parser.add_argument("--max-tilt-deg", type=float, default=60.0)
     parser.add_argument("--slope-angle-deg", type=float, default=12.0)
     parser.add_argument("--rough-height", type=float, default=0.04)
@@ -64,6 +66,8 @@ def parse_args(argv=None):
     parser.add_argument("--dry-run", action="store_true",
                         help="Print protocol and, if present, selected checkpoint; create no simulation or files")
     args = parser.parse_args(argv)
+    if args.no_record and args.output_dir is not None:
+        parser.error("--no-record cannot be combined with --output-dir")
     if args.size_m is None:
         if args.layout == "region":
             parser.error("--layout region requires an explicit --size-m in metres")
@@ -116,9 +120,8 @@ def parse_args(argv=None):
     if min(args.envs_per_terrain, args.episodes_per_env) < 1 or min(args.seed, args.trajectory_stride, args.num_threads) < 0:
         parser.error("environment/episode counts must be positive; seed, stride and thread count must be nonnegative")
     if args.max_seconds is None:
-        route_length = (args.size_m + PATCH_PLATFORM_LENGTH_M if args.layout == "patch"
-                        else args.size_m - args.spawn_inset - args.goal_inset)
-        args.max_seconds = 2 * route_length / abs(args.speed) + 5
+        route_length = args.size_m - args.spawn_inset - args.goal_inset
+        args.max_seconds = 30. if args.layout == "patch" else 2 * route_length / abs(args.speed) + 5
     if not math.isfinite(args.max_seconds) or args.max_seconds <= 0:
         parser.error("--max-seconds must be finite and positive")
     if args.checkpoint < -1:
@@ -134,7 +137,8 @@ def parse_args(argv=None):
 def protocol_dict(args):
     patch = args.layout == "patch"
     return {
-        "version": 6, "data_mode": "raw_formula_inputs", "layout": args.layout, "task": args.task, "size_m": args.size_m,
+        "version": 7 if patch else 6, "data_mode": "preview_no_record" if args.no_record else "raw_formula_inputs",
+        "write_files": not args.no_record, "layout": args.layout, "task": args.task, "size_m": args.size_m,
         "terrain_types": list(args.terrain_types), "eval_seed": args.seed,
         "envs_per_terrain": args.envs_per_terrain, "episodes_per_env": args.episodes_per_env,
         "total_episodes": len(args.terrain_types) * args.envs_per_terrain * args.episodes_per_env,
@@ -144,19 +148,24 @@ def protocol_dict(args):
         "goal_inset_m": args.goal_inset if not patch else None, "lateral_margin_m": args.lateral_margin if not patch else None,
         "wheel_side": args.wheel_side if patch else None,
         "spawn_xy_jitter_m": args.spawn_xy_jitter if patch else None,
-        "measurement_window": "first wheel projection enters the patch until the last of all four wheels fully clears the opposite edge; keep measuring between axles" if patch else "initialization to terminal state",
+        "spawn_distance_before_entry_m": PATCH_PLATFORM_LENGTH_M / 2 if patch else None,
+        "spawn_alignment": "entry-edge midpoint, yaw=0; XY jitter is zero by default" if patch else None,
+        "allowed_exit_edges": (["xmax", "ymin", "ymax"] if args.speed > 0 else ["xmin", "ymin", "ymax"]) if patch else None,
+        "exit_edge_extent": "entire finite edge segment of the 6.2 x 6.2 m rectangle; original entry excluded" if patch else None,
+        "measurement_window": "first wheel projection enters the patch until the last of all four wheels fully clears the opposite or a lateral edge after all four entered, or fall/timeout; keep measuring during retreat/re-entry" if patch else "initialization to terminal state",
         "event_sampling": "policy-step boundary; each detected boundary may lag the geometric event by up to one policy interval" if patch else "policy steps",
         "entry_requires_contact": False if patch else None,
-        "success_rule": "all four wheels entered through the entry edge and all four trailing wheel edges clear the opposite edge, without failure" if patch else "base x reaches xmax - goal_inset, with y inside region and no failure",
+        "success_rule": "all four wheels entered the patch and then fully clear the same opposite or lateral finite edge, without falling; original entry edge is not a success exit" if patch else "base x reaches xmax - goal_inset, with y inside region and no failure",
         "required_wheels": ["FL", "FR", "RL", "RR"] if patch else None,
-        "failure_rule": "persistent training contact failure, tilt limit, corridor exit, bypass or retreat; failure takes priority over success" if patch else "persistent training contact failure, tilt over limit or base exits region; failure takes priority over success",
+        "failure_rule": "fall only: base tilt from upright exceeds max_tilt_deg; fall takes priority over success; contact, bypass, corridor exit and retreat are not early failures" if patch else "persistent training contact failure, tilt over limit or base exits region; failure takes priority over success",
+        "numerical_error_rule": "abort collection and retain interrupted records; never count as a fall" if patch else None,
         "max_tilt_deg": args.max_tilt_deg,
         "velocity_acceleration": "world XYZ velocity and finite-difference acceleration, no filtering, threshold or warmup exclusion",
         "trajectory_stride": args.trajectory_stride,
-        "recording": "every control interval and every physics substep inside the measurement window",
+        "recording": "disabled" if args.no_record else "every control interval and every physics substep inside the measurement window",
         "physics_inputs": "actual applied joint torque and before/after joint angular velocity with physical dt",
         "distance_inputs": "current/previous world XYZ position plus initial goal direction; no fixed terrain-length COT denominator",
-        "online_outputs": "raw samples, event rows and event counts; no power/energy/COT/RMSE/VIR/success-rate results",
+        "online_outputs": "console progress only; no output files" if args.no_record else "raw samples, event rows and event counts; no power/energy/COT/RMSE/VIR/success-rate results",
         "randomization": "disabled, including 0.8-1.1 torque scaling",
         "terrain_parameters": dict({name: getattr(args, name) for name in
                                (("slope_angle_deg", "rough_height", "step_width") if patch else
@@ -276,6 +285,7 @@ def configure_evaluation(env_cfg, args, checkpoint=None):
     cfg.terrain.horizontal_scale, cfg.terrain.vertical_scale = (.02 if args.layout == "patch" else .1), .005
     cfg.terrain.border_size, cfg.terrain.gap_size, cfg.terrain.platform_length = 2., 2., PATCH_PLATFORM_LENGTH_M
     cfg.terrain.corridor_width = PATCH_CORRIDOR_WIDTH_M if args.layout == "patch" else args.size_m
+    cfg.terrain.spawn_xy_jitter = args.spawn_xy_jitter
     cfg.terrain.slope_treshold = 0.75
     for name, value in protocol_dict(args)["terrain_parameters"].items():
         setattr(cfg.terrain, name, value)

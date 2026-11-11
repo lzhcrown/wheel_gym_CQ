@@ -34,7 +34,7 @@ def patch_env(sign=1, quota=1, all_wheels=False):
     env.metrics.episode_index[:] = -1
     env.attempt_indices[:] = -1
     env._attempt_metadata = [{}]
-    env.crossing = WheelWindowCrossing(1, "cpu")
+    env.crossing = WheelWindowCrossing(1, "cpu", exit_rule="opposite_or_sides")
     env.attempt_active = torch.zeros(1, dtype=torch.bool)
     env.evaluation.command_vx = float(sign)
     env.evaluation.wheel_side = "all" if all_wheels else "both"
@@ -109,15 +109,18 @@ class PatchEvaluationEnvTests(unittest.TestCase):
         self.assertEqual(env.completed_episodes[0]["selected_side"], "all")
         self.assertTrue(all(bounds[0] >= 6.2 for bounds in env.completed_episodes[0]["terminal_wheel_bounds_xy"]))
 
-    def test_standard_window_rejects_right_rear_bypass_after_other_wheels_enter(self):
+    def test_standard_window_does_not_succeed_or_fail_if_one_wheel_never_entered(self):
         env = patch_env(all_wheels=True)
         env._wheel_center_offsets[3, 1] = 4.
         advance(env, -.5)
         advance(env, .5)
         advance(env, 6.75)
         self.assertEqual(env.crossing.wheels_entered_mask[0].tolist(), [True, True, True, False])
-        self.assertEqual(env._episode_status[0], "failure")
-        self.assertEqual(env._episode_reason[0], "bypass")
+        self.assertFalse(env.reset_buf[0])
+        self.assertTrue(env.crossing.active[0])
+        env.max_episode_length = 4
+        advance(env, 6.8)
+        self.assertEqual(env._episode_status[0], "timeout")
 
     def test_urdf_fk_and_collision_geometry_are_json_safe_and_match_robot(self):
         cfg = geometry_cfg()
@@ -221,18 +224,18 @@ class PatchEvaluationEnvTests(unittest.TestCase):
         self.assertEqual(row["gravity_m_s2"], 9.81)
         self.assertNotIn("success_rate", row)
 
-    def test_bypass_retreat_fall_and_corridor_exit_have_distinct_reasons(self):
+    def test_only_fall_terminates_early_bypass_retreat_and_corridor_exit_can_continue(self):
         with self.subTest("bypass"):
             env = patch_env()
             advance(env, -.7, y=.5)
             advance(env, 1., y=.5)
-            self.assertEqual(env._episode_reason[0], "bypass")
+            self.assertFalse(env.reset_buf[0])
             self.assertFalse(env.metrics.active[0])
         with self.subTest("retreat"):
             env = patch_env()
             advance(env, -.5)
             advance(env, -.8)
-            self.assertEqual(env._episode_reason[0], "retreat")
+            self.assertFalse(env.reset_buf[0])
             self.assertTrue(env.metrics.active[0])
         with self.subTest("fall"):
             env = patch_env()
@@ -242,18 +245,60 @@ class PatchEvaluationEnvTests(unittest.TestCase):
         with self.subTest("out_of_corridor"):
             env = patch_env()
             advance(env, -.7, y=1.1)
-            self.assertEqual(env._episode_reason[0], "out_of_corridor")
+            self.assertFalse(env.reset_buf[0])
 
-    def test_invalid_velocity_at_first_entry_records_failure_without_start_error(self):
+    def test_contact_alone_does_not_count_as_a_fall(self):
+        env = patch_env(all_wheels=True)
+        env.contact_forces[0, 4, 2] = 100.
+        env.fail_buf[:] = 1000
+        advance(env, .5)
+        self.assertFalse(env.reset_buf[0])
+
+    def test_lateral_exit_is_success_and_records_the_actual_edge(self):
+        for y, edge in ((4., "ymax"), (-4., "ymin")):
+            env = patch_env(all_wheels=True)
+            advance(env, .5)
+            advance(env, 3., y=y)
+            self.assertEqual(env._episode_status[0], "success")
+            self.assertEqual(env._attempt_metadata[0]["exit_edge"], edge)
+            env._finish_attempt(torch.tensor([0]), "success", "all_wheels_cleared")
+            self.assertEqual(len(env.control_rows), 1)
+            self.assertEqual(len(env.physics_rows), 4)
+
+    def test_return_through_entrance_is_not_success_and_reentry_can_succeed(self):
+        env = patch_env(all_wheels=True)
+        advance(env, .5)
+        advance(env, -.8)
+        self.assertFalse(env.reset_buf[0])
+        self.assertTrue(env.metrics.active[0])
+        advance(env, .5)
+        advance(env, 6.75)
+        self.assertEqual(env._episode_status[0], "success")
+
+    def test_fall_wins_over_simultaneous_exit_and_success_wins_over_timeout(self):
+        env = patch_env(all_wheels=True)
+        advance(env, .5)
+        env.projected_gravity[0, 2] = 0.
+        advance(env, 6.75)
+        self.assertEqual(env._episode_status[0], "failure")
+        self.assertEqual(env._episode_reason[0], "fall")
+        env = patch_env(all_wheels=True)
+        advance(env, .5)
+        env.max_episode_length = 2
+        advance(env, 6.75)
+        self.assertEqual(env._episode_status[0], "success")
+
+    def test_invalid_velocity_aborts_instead_of_counting_a_fall(self):
         env = patch_env()
         env.root_states[0, 0] = -.5
         env.root_states[0, 7] = float("nan")
         env.rigid_state[:, :4, :3] = env.root_states[:, None, :3] + env._wheel_center_offsets[None]
         env.episode_length_buf += 1
-        env.check_termination()
-        self.assertEqual(env._episode_reason[0], "nonfinite_state")
+        with self.assertRaisesRegex(RuntimeError, "Nonfinite"):
+            env.check_termination()
         self.assertFalse(env.metrics.active[0])
-        env._finish_attempt(torch.tensor([0]), "failure", "nonfinite_state")
+        env.interrupt("evaluation_error")
+        self.assertEqual(env.completed_episodes[0]["status"], "interrupted")
         self.assertFalse(env.completed_episodes[0]["window_started"])
         self.assertIsNone(env.completed_episodes[0]["window_end_time_s"])
 

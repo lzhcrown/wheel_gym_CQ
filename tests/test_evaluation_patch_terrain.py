@@ -173,12 +173,29 @@ class PatchTerrainTests(unittest.TestCase):
         np.testing.assert_array_equal(patch_grid(terrain, 4), patch_grid(reordered, 1))
         np.testing.assert_array_equal(patch_grid(terrain, 0), patch_grid(reordered, 2))
         ids = np.arange(7)
-        first = terrain.sample_spawns(ids, np.random.default_rng(42), direction=[1, -1, 1, -1, 1, -1, 1])
-        second = terrain.sample_spawns(ids, np.random.default_rng(42), direction=[1, -1, 1, -1, 1, -1, 1])
+        first = terrain.sample_spawns(ids, np.random.default_rng(42), direction=[1, -1, 1, -1, 1, -1, 1], xy_jitter=.04)
+        second = terrain.sample_spawns(ids, np.random.default_rng(42), direction=[1, -1, 1, -1, 1, -1, 1], xy_jitter=.04)
         for key in first:
             np.testing.assert_array_equal(first[key], second[key])
-        changed = terrain.sample_spawns(ids, np.random.default_rng(43))
+        changed = terrain.sample_spawns(ids, np.random.default_rng(43), xy_jitter=.04)
         self.assertFalse(np.array_equal(changed["ground_positions"], first["ground_positions"]))
+
+    def test_default_start_is_exact_entry_midpoint_offset_for_every_seed_and_attempt(self):
+        terrain = PatchEvaluationTerrain(config(), 7)
+        ids = np.arange(7)
+        for sign in (1, -1):
+            reference = None
+            for seed in (10, 100, 101):
+                rng = np.random.default_rng(seed)
+                for _ in range(3):
+                    plan = terrain.sample_spawns(ids, rng, direction=sign)
+                    start = plan["ground_positions"]
+                    entry_x = terrain.patch_bounds[:, 0 if sign > 0 else 1]
+                    np.testing.assert_allclose(start[:, 0], entry_x - sign * .75)
+                    np.testing.assert_allclose(start[:, 1], terrain.patch_bounds[:, 2:4].mean(axis=1))
+                    if reference is not None:
+                        np.testing.assert_array_equal(start, reference)
+                    reference = start
 
     def test_mesh_stair_faces_at_nominal_insets_and_no_slope_exit_cliff(self):
         terrain = PatchEvaluationTerrain(config(mesh_type="trimesh",
