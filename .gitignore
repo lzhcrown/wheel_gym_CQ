@@ -7,7 +7,6 @@
 
 # Training logs, generated data, videos and exported policies
 /logs/
-/logs.zip
 /videos/
 /runs/
 /wandb/
@@ -15,6 +14,19 @@
 /data/
 /evaluations/
 /artifacts/evaluation_terrain/
+# Root-level backups of generated runs (including dated archive names).
+/logs*.zip
+/logs*.tar
+/logs*.tar.gz
+/logs*.tar.xz
+/logs*.tgz
+/logs*.7z
+/evaluations*.zip
+/evaluations*.tar
+/evaluations*.tar.gz
+/evaluations*.tar.xz
+/evaluations*.tgz
+/evaluations*.7z
 # Also cover event files and console logs outside the default output folders.
 events.out.tfevents.*
 *.log

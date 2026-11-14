@@ -55,6 +55,7 @@ class Nezha2Cfg(LeggedRobotCfg):
     class terrain(LeggedRobotCfg.terrain):
         mesh_type = 'trimesh' # "heightfield" # none, plane, heightfield or trimesh
         horizontal_scale = 0.1 # [m]
+        stair_tread_width = 0.3 # [m], shared by all five MINE ablations
         vertical_scale = 0.005 # [m]
         border_size = 25 # [m]
         curriculum = True  

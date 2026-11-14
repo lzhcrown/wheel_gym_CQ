@@ -137,7 +137,7 @@ def parse_args(argv=None):
 def protocol_dict(args):
     patch = args.layout == "patch"
     return {
-        "version": 7 if patch else 6, "data_mode": "preview_no_record" if args.no_record else "raw_formula_inputs",
+        "version": 9 if patch else 6, "data_mode": "preview_no_record" if args.no_record else "raw_formula_inputs",
         "write_files": not args.no_record, "layout": args.layout, "task": args.task, "size_m": args.size_m,
         "terrain_types": list(args.terrain_types), "eval_seed": args.seed,
         "envs_per_terrain": args.envs_per_terrain, "episodes_per_env": args.episodes_per_env,
@@ -151,7 +151,7 @@ def protocol_dict(args):
         "spawn_distance_before_entry_m": PATCH_PLATFORM_LENGTH_M / 2 if patch else None,
         "spawn_alignment": "entry-edge midpoint, yaw=0; XY jitter is zero by default" if patch else None,
         "allowed_exit_edges": (["xmax", "ymin", "ymax"] if args.speed > 0 else ["xmin", "ymin", "ymax"]) if patch else None,
-        "exit_edge_extent": "entire finite edge segment of the 6.2 x 6.2 m rectangle; original entry excluded" if patch else None,
+        "exit_edge_extent": "entire finite edge segment of the {0:g} x {0:g} m rectangle; original entry excluded".format(PATCH_SIZE_M) if patch else None,
         "measurement_window": "first wheel projection enters the patch until the last of all four wheels fully clears the opposite or a lateral edge after all four entered, or fall/timeout; keep measuring during retreat/re-entry" if patch else "initialization to terminal state",
         "event_sampling": "policy-step boundary; each detected boundary may lag the geometric event by up to one policy interval" if patch else "policy steps",
         "entry_requires_contact": False if patch else None,

@@ -24,6 +24,10 @@ bash scripts/train_mine_ablation.sh --max_iterations 10000 --num_envs 4096 --sav
 训练出生高度：init_state.pos[2] = 0.6 米，相对于地形环境原点。
 高度奖励目标：rewards.base_height_target = 0.5 米，相对于采样地面的平均高度。
 五组继承同一套环境、奖励和训练设置，仅改变对应消融开关。
+训练阶梯踏面宽度：terrain.stair_tread_width = 0.3 m，实际为3个10cm网格。
+训练区域10×10m、中心平台4×4m，因此每侧10级；单级高度继续随课程变化，
+名义值为3～19.2cm，按5mm网格量化后约3～19cm。五组共用该设置。
+
 
 结果保存在 logs/mine_ablation/时间戳_实验名_seed10/，不同运行分别保存。
 训练指标 CSV 仅输出平均奖励：csv/Train_mean_reward.csv。

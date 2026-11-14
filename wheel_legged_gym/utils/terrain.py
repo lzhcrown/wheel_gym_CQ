@@ -314,8 +314,15 @@ class Terrain:
         elif choice < self.proportions[4]:
             if choice < self.proportions[3]:
                 step_height *= -1
+            tread = float(getattr(self.cfg, "stair_tread_width", 0.3))
+            cells = round(tread / self.cfg.horizontal_scale)
+            if cells < 1 or not np.isclose(cells * self.cfg.horizontal_scale, tread, rtol=0., atol=1e-9):
+                raise ValueError("stair_tread_width must be a positive multiple of horizontal_scale")
+            # Gym truncates int(width / scale): 0.3 / 0.1 can fall below 3.
+            # Nudge the exact grid multiple upward by one ULP, without adding a cell.
+            grid_tread = np.nextafter(cells * self.cfg.horizontal_scale, np.inf)
             terrain_utils.pyramid_stairs_terrain(
-                terrain, step_width=0.7, step_height=step_height, platform_size=4.0
+                terrain, step_width=grid_tread, step_height=step_height, platform_size=4.0
             )   # 生成阶梯
         elif choice < self.proportions[5]:
             num_rectangles = 20

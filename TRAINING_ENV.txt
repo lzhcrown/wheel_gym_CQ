@@ -12,7 +12,7 @@ wheel_legged_gym/experiments/mine_ablation/EVALUATION_METRICS.txt
 独立Isaac Gym评估入口与CSV说明（已实现）：
 wheel_legged_gym/evaluation/README.txt
 bash scripts/evaluate_mine.sh --help
-默认6.2×6.2米测试区域，共7类（平地、凹/凸阶梯各15/20cm、±4cm粗糙面、12°坡）；
+默认7.8×7.8米测试区域，共7类（平地、凹/凸阶梯各15/20cm、±4cm粗糙面、12°坡）；
 首轮进入时开始统计，四轮都进入过后从对侧或左右侧边完整离开即成功；原入口除外。
 默认起点为入口边界中点前方0.75m，XY扰动0；时限30s，提前失败只判机身倾斜超过60°。
 当前只采公式输入：约200Hz逐关节力矩/角速度，约50Hz位置/速度/加速度及指令；
@@ -43,6 +43,10 @@ python wheel_legged_gym/scripts/train.py --task nezha2_mine --max_iterations 100
 未传入覆盖参数时使用现有方法配置：4096 个并行环境、seed=10、复杂地形
 trimesh、每轮每环境采样 24 步、100000 次迭代、每 200 次迭代保存模型。
 奖励、地形课程和优化器超参数继续使用该方法原有设置。
+训练阶梯踏面宽度：terrain.stair_tread_width = 0.3 m，实际为3个10cm网格。
+训练区域10×10m、中心平台4×4m，因此每侧10级；单级高度继续随课程变化，
+名义值为3～19.2cm，按5mm网格量化后约3～19cm。五组共用该设置。
+
 可通过 --num_envs、--seed、--max_iterations、--save_interval 覆盖对应参数。
 运行时按 Ctrl+C 停止；已经写入的平均奖励 CSV 会保留。
 

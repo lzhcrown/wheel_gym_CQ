@@ -372,8 +372,8 @@ class PatchEvaluationEnvTests(unittest.TestCase):
                 env = patch_env(sign=sign, all_wheels=True)
                 del env.evaluation.wheel_side  # Production fallback must be all.
                 cfg = NS(mesh_type="heightfield", type_names=("slope",),
-                         terrain_length=6.2, terrain_width=6.2, horizontal_scale=.02,
-                         vertical_scale=.005, border_size=2., corridor_width=8.2,
+                         terrain_length=7.8, terrain_width=7.8, horizontal_scale=.02,
+                         vertical_scale=.005, border_size=2., corridor_width=9.8,
                          **{key: geometry[key] for key in ("left_wheel_y", "right_wheel_y", "front_wheel_x",
                              "rear_wheel_x", "wheel_radius", "wheel_x_min", "wheel_x_max", "wheel_y_min", "wheel_y_max")})
                 env.terrain = PatchEvaluationTerrain(cfg, 1)

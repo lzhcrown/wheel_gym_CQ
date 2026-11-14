@@ -38,7 +38,7 @@ class EvaluationConfigTests(unittest.TestCase):
     def test_local_patch_is_default_and_uses_the_entire_crossing_window(self):
         args = parse_args([])
         self.assertEqual(args.layout, "patch")
-        self.assertEqual(args.size_m, 6.2)
+        self.assertEqual(args.size_m, 7.8)
         self.assertFalse(hasattr(args, "warmup_seconds"))
         self.assertFalse(hasattr(args, "vir_threshold"))
         self.assertAlmostEqual(args.max_seconds, 30.)
@@ -48,18 +48,18 @@ class EvaluationConfigTests(unittest.TestCase):
                          "stairs_convex_15cm", "stairs_convex_20cm", "rough", "slope"))
         self.assertEqual(args.rough_height, .04)
         self.assertEqual(args.slope_angle_deg, 12.)
-        self.assertEqual(args.step_width, .2)
+        self.assertEqual(args.step_width, .3)
         protocol = protocol_dict(args)
         self.assertIn("last of all four wheels", protocol["measurement_window"])
         self.assertFalse(protocol["entry_requires_contact"])
         self.assertEqual(protocol["data_mode"], "raw_formula_inputs")
         self.assertEqual(protocol["total_episodes"], 112)
-        self.assertEqual(protocol["version"], 7)
+        self.assertEqual(protocol["version"], 9)
         self.assertEqual(protocol["allowed_exit_edges"], ["xmax", "ymin", "ymax"])
         self.assertEqual(protocol["spawn_distance_before_entry_m"], .75)
         self.assertIn("fall only", protocol["failure_rule"])
         self.assertEqual(protocol["stair_geometry"]["steps_per_side"], 8)
-        self.assertEqual(protocol["stair_geometry"]["tread_width_m"], .2)
+        self.assertEqual(protocol["stair_geometry"]["tread_width_m"], .3)
         self.assertEqual(protocol["stair_geometry"]["central_platform_size_m"], 3.)
         self.assertEqual(protocol["stair_geometry"]["center_depth_or_height_m"], [1.2, 1.6])
         self.assertEqual(protocol["required_wheels"], ["FL", "FR", "RL", "RR"])
@@ -78,7 +78,7 @@ class EvaluationConfigTests(unittest.TestCase):
                         ["--spawn-xy-jitter", ".1"], ["--size-m", "3"],
                         ["--terrain-types", "discrete_obstacles"],
                         ["--terrain-types", "stairs_up"], ["--wheel-side", "left"],
-                        ["--step-height", ".2"], ["--step-width", "1"], ["--step-width", ".5"],
+                        ["--step-height", ".2"], ["--step-width", "1"], ["--step-width", ".2"],
                         ["--vir-threshold", "2"], ["--warmup-seconds", "1"],
                         ["--trajectory-stride", "0"], ["--trajectory-stride", "2"]):
             with self.subTest(invalid=invalid), contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
@@ -89,10 +89,10 @@ class EvaluationConfigTests(unittest.TestCase):
         before = class_to_dict(cfg)
         actual = configure_evaluation(cfg, parse_args(["--speed", "-1"]))
         self.assertEqual(class_to_dict(cfg), before)
-        self.assertEqual(actual.terrain.terrain_length, 6.2)
-        self.assertEqual(actual.terrain.terrain_width, 6.2)
+        self.assertEqual(actual.terrain.terrain_length, 7.8)
+        self.assertEqual(actual.terrain.terrain_width, 7.8)
         self.assertEqual(actual.terrain.horizontal_scale, .02)
-        self.assertEqual(actual.terrain.corridor_width, 8.2)
+        self.assertEqual(actual.terrain.corridor_width, 9.8)
         self.assertEqual(actual.evaluation.wheel_side, "all")
         self.assertLess(actual.terrain.wheel_y_min, actual.terrain.right_wheel_y)
         self.assertGreater(actual.terrain.wheel_y_max, actual.terrain.left_wheel_y)
@@ -208,13 +208,13 @@ class EvaluationConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             output = Path(tmp) / "should_not_exist"
             result = subprocess.run([sys.executable, "-m", "wheel_legged_gym.scripts.evaluate",
-                                     "--size-m", "6.2", "--dry-run", "--log-root", tmp,
+                                     "--size-m", "7.8", "--dry-run", "--log-root", tmp,
                                      "--output-dir", str(output)], cwd=ROOT, text=True, capture_output=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             values = json.loads(result.stdout)
             self.assertTrue(values["dry_run"])
             self.assertEqual(values["layout"], "patch")
-            self.assertEqual(values["size_m"], 6.2)
+            self.assertEqual(values["size_m"], 7.8)
             self.assertEqual(values["total_episodes"], 112)
             self.assertIsNone(values["checkpoint"])
             self.assertFalse(output.exists())
